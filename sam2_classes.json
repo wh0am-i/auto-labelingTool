@@ -1,0 +1,61 @@
+{
+  "description": "Classes e palavras-chave para filtrar predições do SAM2",
+  "classes": [
+    {
+      "id": "car",
+      "label": "car",
+      "description": "Carros de passeio",
+      "keywords": ["car", "sedan", "vehicle", "automobile", "carro"],
+      "min_area_ratio": 0.01,
+      "color_hint": "varies"
+    },
+    {
+      "id": "car_plate",
+      "label": "car_plate",
+      "description": "Placa de carro",
+      "keywords": ["plate", "license plate", "placa", "registration"],
+      "min_area_ratio": 0.001,
+      "color_hint": "white_yellow"
+    },
+    {
+      "id": "truck",
+      "label": "truck",
+      "description": "Caminhonete e caminhão",
+      "keywords": ["truck", "pickup", "lorry", "caminhão", "caminhonete"],
+      "min_area_ratio": 0.015,
+      "color_hint": "varies"
+    },
+    {
+      "id": "bus",
+      "label": "bus",
+      "description": "Ônibus",
+      "keywords": ["bus", "coach", "ônibus", "autobus"],
+      "min_area_ratio": 0.02,
+      "color_hint": "varies"
+    },
+    {
+      "id": "motorcycle",
+      "label": "motorcycle",
+      "description": "Motocicleta",
+      "keywords": ["motorcycle", "bike", "moto", "motorbike", "scooter"],
+      "min_area_ratio": 0.005,
+      "color_hint": "varies"
+    },
+    {
+      "id": "motorcycle_plate",
+      "label": "motorcycle_plate",
+      "description": "Placa de moto",
+      "keywords": ["plate", "license plate", "placa", "moto plate"],
+      "min_area_ratio": 0.0005,
+      "color_hint": "white_yellow"
+    }
+  ],
+  "filtering_rules": {
+    "enabled": true,
+    "min_mask_area_percentage": 0.05,
+    "max_mask_area_percentage": 95.0,
+    "use_size_heuristics": true,
+    "use_shape_heuristics": true,
+    "notes": "SAM2 irá segmentar todos os objetos. Estes filtros ajudam a focar nos objetos de interesse."
+  }
+}

@@ -1,0 +1,36 @@
+.env
+download_sam2_checkpoint.py
+check_sam2_configs.py
+
+# Environment files
+.env
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+logs/
+
+# Checkpoints and model files
+checkpoints/
+*.pt
+*.pth
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Label Studio-specific files
+config.json

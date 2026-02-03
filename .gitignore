@@ -34,3 +34,7 @@ Thumbs.db
 
 # Label Studio-specific files
 config.json
+
+labelStudioVenv/
+
+.continue/

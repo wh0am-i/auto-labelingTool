@@ -1,11 +1,8 @@
+# Environment
 .env
-download_sam2_checkpoint.py
-check_sam2_configs.py
+labelStudioVenv/
 
-# Environment files
-.env
-
-# Python cache files
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -14,27 +11,24 @@ __pycache__/
 *.log
 logs/
 
-# Checkpoints and model files
+# Checkpoints / models (LFS tracks the real ones)
 checkpoints/
-*.pt
-*.pth
 
-# Temporary files
+# Temp
 *.tmp
 *.temp
 *.bak
 
-# IDE-specific files
+# IDE
 .vscode/
 .idea/
 
-# System files
+# OS
 .DS_Store
 Thumbs.db
 
-# Label Studio-specific files
+# Label Studio
 config.json
 
-labelStudioVenv/
-
+# Continue
 .continue/

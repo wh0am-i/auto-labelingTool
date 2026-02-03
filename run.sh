@@ -40,24 +40,30 @@ while true; do
 
     case $choice in
         1)
+            # VERIFICAÇÃO DA VENV
+            if [ ! -d "./labelStudioVenv" ]; then
+                echo "ERRO: A pasta 'labelStudioVenv' não existe no diretório atual."
+                echo "Certifique-se de criar o ambiente virtual antes de iniciar."
+                continue
+            fi
+
             if is_session_active; then
                 echo "Sessão já ativa. Abrindo novo terminal..."
                 gnome-terminal -- bash -c "tmux attach -t $SESSION_NAME" &
             else
                 echo "Criando nova sessão e abrindo terminal..."
-                # Cria a sessão em background
                 tmux new-session -d -s "$SESSION_NAME"
                 
                 # Setup Backend
-                tmux send-keys -t "$SESSION_NAME" "source ~/Documentos/SAMVenv/bin/activate" C-m
-                tmux send-keys -t "$SESSION_NAME" "cd ~/Documentos/labelStudio/label-studio-ml-backend/label_studio_ml/examples/" C-m
+                tmux send-keys -t "$SESSION_NAME" "source ./labelStudioVenv/bin/activate" C-m
+                tmux send-keys -t "$SESSION_NAME" "cd ./label-studio-ml-backend/label_studio_ml/examples/" C-m
                 tmux send-keys -t "$SESSION_NAME" "export DEVICE='cpu' LABEL_STUDIO_URL='http://127.0.0.1:8080'" C-m
                 [ -n "$API_KEY" ] && tmux send-keys -t "$SESSION_NAME" "export LABEL_STUDIO_API_KEY='$API_KEY'" C-m
                 tmux send-keys -t "$SESSION_NAME" "label-studio-ml start ./segment_anything_2_image" C-m
                 
                 # Setup Frontend
                 tmux split-window -v -t "$SESSION_NAME"
-                tmux send-keys -t "$SESSION_NAME" "source ~/Documentos/labelStudio/labelStudioVenv/bin/activate" C-m
+                tmux send-keys -t "$SESSION_NAME" "source ./labelStudioVenv/bin/activate" C-m
                 tmux send-keys -t "$SESSION_NAME" "label-studio start" C-m
                 
                 # Abre o terminal físico chamando o tmux
@@ -65,10 +71,15 @@ while true; do
             fi
             ;;
         2)
+            # VERIFICAÇÃO DA VENV
+            if [ ! -d "./labelStudioVenv" ]; then
+                echo "ERRO: A pasta 'labelStudioVenv' não existe no diretório atual."
+                continue
+            fi
+
             if ! is_session_active; then
                 echo "Erro: Inicie os servidores primeiro."
             else
-                # Se não houver API_KEY, solicita
                 if [ -z "$API_KEY" ]; then
                     read -sp "Insira seu Token do Label Studio: " USER_TOKEN
                     echo ""
@@ -78,10 +89,11 @@ while true; do
                     export LABEL_STUDIO_API_KEY="$API_KEY"
                 fi
                 
-                source ~/Documentos/SAMVenv/bin/activate
-                cd ~/Documentos/labelStudio/label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image
+                source ./labelStudioVenv/bin/activate
+                cd ./label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image
                 export LABEL_STUDIO_URL='http://127.0.0.1:8080' DEVICE='cpu'
                 python3 auto_label_cli.py
+                cd - > /dev/null # Retorna ao diretório original
             fi
             ;;
         3)

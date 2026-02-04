@@ -32,7 +32,10 @@ def check_sam2_checkpoint():
     """Verifica se o checkpoint SAM2 existe em várias localizações comuns"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     examples_dir = os.path.abspath(os.path.join(script_dir, ".."))
-    checkpoint_name = os.getenv('MODEL_CHECKPOINT', 'sam2.1_hiera_large.pt')
+    checkpoint_name = os.getenv('MODEL_CHECKPOINT')
+    if not checkpoint_name:
+        logger.error("✗ MODEL_CHECKPOINT não configurado no ambiente. Defina MODEL_CHECKPOINT no .env")
+        return False
 
     candidates = [
         os.path.join(script_dir, "checkpoints", checkpoint_name),        # plugin/checkpoints
@@ -62,13 +65,16 @@ def main():
     """Interface CLI para auto-labeling interativo"""
     
     # Configurações
-    label_studio_url = os.getenv('LABEL_STUDIO_URL', 'http://127.0.0.1:8080')
-    api_key = os.getenv('LABEL_STUDIO_API_KEY')
+    label_studio_url = os.getenv('LABEL_STUDIO_URL')
+    if not label_studio_url:
+        logger.error("✗ LABEL_STUDIO_URL não configurado no ambiente. Defina LABEL_STUDIO_URL no .env")
+        sys.exit(1)
+    api_key = os.getenv('LEGACY_TOKEN')
     
     # Valida API Key
     if not api_key:
-        logger.error("✗ LABEL_STUDIO_API_KEY não configurada")
-        logger.info("Use: export LABEL_STUDIO_API_KEY='seu_token'")
+        logger.error("✗ LEGACY_TOKEN não configurado")
+        logger.info("Use: export LEGACY_TOKEN='seu_token'  (ou PERSONAL_TOKEN para a variante pessoal)")
         sys.exit(1)
     
     # Valida conexão com Label Studio

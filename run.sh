@@ -1,115 +1,144 @@
 #!/bin/bash
 
-# Verifique se o tmux está instalado
-if ! command -v tmux &> /dev/null; then
-    echo "tmux não está instalado. Instalando..."
-    sudo apt-get update && sudo apt-get install tmux -y
-fi
+# --- CONFIGURAÇÃO ---
+ENV_FILE=".env"
 
-# Nome da sessão tmux
-SESSION_NAME="label_studio_sam"
+# Função para carregar variáveis do .env
+load_env() {
+    if [ -f "$ENV_FILE" ]; then
+        export $(grep -v '^#' "$ENV_FILE" | xargs)
+    fi
+}
 
-# Função para exibir menu
-show_menu() {
-    echo -e "\n========================================"
-    echo "       Label Studio + SAM2 Menu"
+# Função para limpar memória (variáveis da sessão)
+reset_memory() {
+    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG
+}
+
+init_config() {
+    [ ! -f "$ENV_FILE" ] && touch "$ENV_FILE"
+    load_env
+
+    # Configuração do Dispositivo
+    if [ -z "$DEVICE" ]; then
+        read -p "[CONFIGURACAO] Dispositivo (cpu / cuda): " IN_DEV
+        if [ ! -z "$IN_DEV" ]; then
+            DEVICE=$IN_DEV
+            echo "DEVICE=$DEVICE" >> "$ENV_FILE"
+        else
+            init_config
+        fi
+    fi
+
+    # Configuração da URL
+    if [ -z "$LABEL_STUDIO_URL" ]; then
+        read -p "[CONFIGURACAO] URL do Label Studio (Padrao: http://127.0.0.1:8080): " IN_URL
+        if [ -z "$IN_URL" ]; then
+            LABEL_STUDIO_URL="http://127.0.0.1:8080"
+        else
+            LABEL_STUDIO_URL=$IN_URL
+        fi
+        echo "LABEL_STUDIO_URL=$LABEL_STUDIO_URL" >> "$ENV_FILE"
+    fi
+}
+
+start_servers() {
+    echo "Iniciando servidores..."
+    source ./labelStudioVenv/bin/activate
+    
+    # Inicia Backend em segundo plano
+    export DEVICE=$DEVICE
+    export LABEL_STUDIO_URL=$LABEL_STUDIO_URL
+    cd ./label-studio-ml-backend/label_studio_ml/examples/
+    label-studio-ml start ./segment_anything_2_image &
+    BACKEND_PID=$!
+    cd - > /dev/null
+
+    # Inicia Label Studio em segundo plano
+    label-studio start &
+    LS_PID=$!
+    
+    echo "Servidores rodando (PIDs: $BACKEND_PID, $LS_PID). Pressione Enter para voltar ao menu."
+    read
+}
+
+auto_label() {
+    load_env
+    
+    if [ -z "$PERSONAL_TOKEN" ]; then
+        read -p "[CONFIGURACAO] Informe o PERSONAL_TOKEN: " IN_PT
+        [ ! -z "$IN_PT" ] && PERSONAL_TOKEN=$IN_PT && echo "PERSONAL_TOKEN=$PERSONAL_TOKEN" >> "$ENV_FILE"
+    fi
+
+    if [ -z "$LEGACY_TOKEN" ]; then
+        read -p "[CONFIGURACAO] Informe o LEGACY_TOKEN: " IN_LT
+        [ ! -z "$IN_LT" ] && LEGACY_TOKEN=$IN_LT && echo "LEGACY_TOKEN=$LEGACY_TOKEN" >> "$ENV_FILE"
+    fi
+
+    if [ -z "$MODEL_CHECKPOINT" ]; then
+        read -p "[CONFIGURACAO] Caminho Checkpoint (Enter para padrao): " IN_CP
+        MODEL_CHECKPOINT=${IN_CP:-"label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image/checkpoints/sam2.1_hiera_large.pt"}
+        echo "MODEL_CHECKPOINT=$MODEL_CHECKPOINT" >> "$ENV_FILE"
+    fi
+
+    if [ -z "$MODEL_CONFIG" ]; then
+        read -p "[CONFIGURACAO] Nome do Model Config (Enter para padrao): " IN_CFG
+        MODEL_CONFIG=${IN_CFG:-"sam2.1/sam2.1_hiera_l"}
+        echo "MODEL_CONFIG=$MODEL_CONFIG" >> "$ENV_FILE"
+    fi
+
+    export LABEL_STUDIO_API_KEY=$PERSONAL_TOKEN
+    export PERSONAL_TOKEN=$PERSONAL_TOKEN
+    export LEGACY_TOKEN=$LEGACY_TOKEN
+    export DEVICE=$DEVICE
+    export LABEL_STUDIO_URL=$LABEL_STUDIO_URL
+
+    echo "Iniciando Auto-labeling CLI..."
+    source ./labelStudioVenv/bin/activate
+    pushd ./label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image > /dev/null
+    python3 auto_label_cli.py
+    popd > /dev/null
+    read -p "Pressione Enter para continuar..."
+}
+
+stop_servers() {
+    echo "Parando servidores..."
+    pkill -f "label-studio"
+    pkill -f "label-studio-ml"
+    echo "Processos encerrados."
+    sleep 2
+}
+
+reset_env() {
+    echo "Apagando configuracoes e limpando memoria..."
+    [ -f "$ENV_FILE" ] && rm "$ENV_FILE"
+    reset_memory
+    init_config
+}
+
+# Loop do Menu Principal
+while true; do
+    init_config
+    clear
+    echo "========================================"
+    echo "       Label Studio + SAM2 Menu (Linux)"
+    echo "========================================"
+    echo "CONFIG ATUAL: $DEVICE | $LABEL_STUDIO_URL"
     echo "========================================"
     echo "1. Iniciar servidores"
     echo "2. Auto-labeling interativo"
     echo "3. Parar servidores"
-    echo "4. Sair"
+    echo "4. Resetar configuracoes (.env)"
+    echo "5. Sair"
     echo "========================================"
-}
-
-# Função para verificar sessão
-is_session_active() {
-    tmux has-session -t "$SESSION_NAME" 2>/dev/null
-}
-
-# Carregar .env
-if [ -f .env ]; then
-    export $(grep -v '^#' .env | xargs)
-    echo "Variáveis de ambiente carregadas."
-else
-    echo "Aviso: Arquivo .env não encontrado."
-fi
-
-while true; do
-    show_menu
-    read -p "Escolha uma opção (1-4): " choice
+    read -p "Escolha uma opcao (1-5): " choice
 
     case $choice in
-        1)
-            # VERIFICAÇÃO DA VENV
-            if [ ! -d "./labelStudioVenv" ]; then
-                echo "ERRO: A pasta 'labelStudioVenv' não existe no diretório atual."
-                echo "Certifique-se de criar o ambiente virtual antes de iniciar."
-                continue
-            fi
-
-            if is_session_active; then
-                echo "Sessão já ativa. Abrindo novo terminal..."
-                gnome-terminal -- bash -c "tmux attach -t $SESSION_NAME" &
-            else
-                echo "Criando nova sessão e abrindo terminal..."
-                tmux new-session -d -s "$SESSION_NAME"
-                
-                # Setup Backend
-                tmux send-keys -t "$SESSION_NAME" "source ./labelStudioVenv/bin/activate" C-m
-                tmux send-keys -t "$SESSION_NAME" "cd ./label-studio-ml-backend/label_studio_ml/examples/" C-m
-                tmux send-keys -t "$SESSION_NAME" "export DEVICE='cpu' LABEL_STUDIO_URL='http://127.0.0.1:8080'" C-m
-                [ -n "$API_KEY" ] && tmux send-keys -t "$SESSION_NAME" "export LABEL_STUDIO_API_KEY='$API_KEY'" C-m
-                tmux send-keys -t "$SESSION_NAME" "label-studio-ml start ./segment_anything_2_image" C-m
-                
-                # Setup Frontend
-                tmux split-window -v -t "$SESSION_NAME"
-                tmux send-keys -t "$SESSION_NAME" "source ./labelStudioVenv/bin/activate" C-m
-                tmux send-keys -t "$SESSION_NAME" "label-studio start" C-m
-                
-                # Abre o terminal físico chamando o tmux
-                gnome-terminal -- bash -c "tmux attach -t $SESSION_NAME" &
-            fi
-            ;;
-        2)
-            # VERIFICAÇÃO DA VENV
-            if [ ! -d "./labelStudioVenv" ]; then
-                echo "ERRO: A pasta 'labelStudioVenv' não existe no diretório atual."
-                continue
-            fi
-
-            if ! is_session_active; then
-                echo "Erro: Inicie os servidores primeiro."
-            else
-                if [ -z "$API_KEY" ]; then
-                    read -sp "Insira seu Token do Label Studio: " USER_TOKEN
-                    echo ""
-                    [ -z "$USER_TOKEN" ] && continue
-                    export LABEL_STUDIO_API_KEY="$USER_TOKEN"
-                else
-                    export LABEL_STUDIO_API_KEY="$API_KEY"
-                fi
-                
-                source ./labelStudioVenv/bin/activate
-                cd ./label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image
-                export LABEL_STUDIO_URL='http://127.0.0.1:8080' DEVICE='cpu'
-                python3 auto_label_cli.py
-                cd - > /dev/null # Retorna ao diretório original
-            fi
-            ;;
-        3)
-            if is_session_active; then
-                tmux kill-session -t "$SESSION_NAME"
-                echo "Servidores finalizados."
-            else
-                echo "Nenhuma sessão ativa."
-            fi
-            ;;
-        4)
-            echo "Saindo..."
-            exit 0
-            ;;
-        *)
-            echo "Opção inválida."
-            ;;
+        1) start_servers ;;
+        2) auto_label ;;
+        3) stop_servers ;;
+        4) reset_env ;;
+        5) exit 0 ;;
+        *) echo "Opcao invalida." && sleep 1 ;;
     esac
 done

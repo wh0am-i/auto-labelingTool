@@ -61,32 +61,47 @@ def find_existing_path(*candidates):
             return p
     return None
 
-# Configuração do cliente Label Studio
-LABEL_STUDIO_API_KEY = os.getenv('LABEL_STUDIO_API_KEY') or os.getenv('API_KEY')
-logger.info(f"Chave capturada do env")
-LABEL_STUDIO_URL = os.getenv('LABEL_STUDIO_URL', 'http://127.0.0.1:8080')
+# Configuração do cliente Label Studio (preferência: LEGACY_TOKEN, fallback PERSONAL_TOKEN)
+LEGACY_TOKEN = os.getenv('LEGACY_TOKEN') or os.getenv('PERSONAL_TOKEN')
+if not LEGACY_TOKEN:
+    logger.warning("LEGACY_TOKEN / PERSONAL_TOKEN não encontrado no ambiente. Serviço Label Studio não será inicializado.")
+LABEL_STUDIO_URL = os.getenv('LABEL_STUDIO_URL')
+if not LABEL_STUDIO_URL:
+    logger.error("LABEL_STUDIO_URL não encontrado no ambiente. Defina LABEL_STUDIO_URL no .env para que o backend conecte ao Label Studio.")
 
 try:
-    client = Client(url=LABEL_STUDIO_URL, api_key=LABEL_STUDIO_API_KEY)
-    logger.info(f"Conectado ao Label Studio em {LABEL_STUDIO_URL}")
+    client = Client(url=LABEL_STUDIO_URL, api_key=LEGACY_TOKEN) if (LABEL_STUDIO_URL and LEGACY_TOKEN) else None
+    if client:
+        logger.info(f"Conectado ao Label Studio em {LABEL_STUDIO_URL}")
+    else:
+        logger.warning("Cliente Label Studio não inicializado por falta de configuração (LABEL_STUDIO_URL/LEGACY_TOKEN).")
 except Exception as e:
     logger.warning(f"Aviso ao conectar ao Label Studio: {e}")
     client = None
 
-# SAM2.1: use the format WITHOUT the directory prefix
-# The SAM2 package handles hydra config discovery internally
-DEFAULT_CONFIG_NAME = os.getenv('MODEL_CONFIG', 'sam2.1/sam2.1_hiera_l')
-DEFAULT_CHECKPOINT_NAME = os.getenv('MODEL_CHECKPOINT', 'sam2.1_hiera_large.pt')
-DEVICE = os.getenv('DEVICE', 'cpu')
-logger.info("Utilizando device %s (configure DEVICE env var para 'cuda' se GPU disponível).", DEVICE)
+DEFAULT_CONFIG_NAME = os.getenv('MODEL_CONFIG')
+DEFAULT_CHECKPOINT_NAME = os.getenv('MODEL_CHECKPOINT')
+DEVICE = os.getenv('DEVICE')
+if not DEFAULT_CONFIG_NAME:
+    logger.error("MODEL_CONFIG não configurado no ambiente. Defina MODEL_CONFIG no .env")
+if not DEFAULT_CHECKPOINT_NAME:
+    logger.error("MODEL_CHECKPOINT não configurado no ambiente. Defina MODEL_CHECKPOINT no .env")
+if not DEVICE:
+    logger.error("DEVICE não configurado no ambiente. Defina DEVICE (ex: cpu ou cuda) no .env")
+else:
+    logger.info("Utilizando device %s (configure DEVICE env var para 'cuda' se GPU disponível).", DEVICE)
 
 # Checkpoint candidates (absolute paths)
-candidates_ckpt = [
-    os.getenv('MODEL_CHECKPOINT') if os.path.isabs(os.getenv('MODEL_CHECKPOINT', '')) else None,
-    os.path.join(EXAMPLES_DIR, 'checkpoints', DEFAULT_CHECKPOINT_NAME),
-    os.path.join(PLUGIN_DIR, 'checkpoints', DEFAULT_CHECKPOINT_NAME),
-    os.path.join(EXAMPLES_DIR, DEFAULT_CHECKPOINT_NAME),
-]
+candidates_ckpt = []
+if DEFAULT_CHECKPOINT_NAME:
+    # only build candidate list from provided env value(s)
+    if os.path.isabs(DEFAULT_CHECKPOINT_NAME):
+        candidates_ckpt.append(DEFAULT_CHECKPOINT_NAME)
+    candidates_ckpt.extend([
+        os.path.join(EXAMPLES_DIR, 'checkpoints', DEFAULT_CHECKPOINT_NAME),
+        os.path.join(PLUGIN_DIR, 'checkpoints', DEFAULT_CHECKPOINT_NAME),
+        os.path.join(EXAMPLES_DIR, DEFAULT_CHECKPOINT_NAME),
+    ])
 
 RESOLVED_MODEL_CHECKPOINT = find_existing_path(*[c for c in candidates_ckpt if c])
 
@@ -778,8 +793,12 @@ class NewModel(LabelStudioMLBase):
         quando for usado o AutomaticMaskGenerator.
         """
         try:
-            ls_base = os.getenv('LABEL_STUDIO_URL', 'http://127.0.0.1:8080').rstrip('/')
-            token = os.getenv('LABEL_STUDIO_API_KEY') or os.getenv('API_PERSONAL_ACESS_TOKEN') or os.getenv('API_KEY')
+            ls_base = os.getenv('LABEL_STUDIO_URL')
+            if not ls_base:
+                raise RuntimeError("LABEL_STUDIO_URL não definido no ambiente; não é possível resolver imagens servidas pelo Label Studio.")
+            ls_base = ls_base.rstrip('/')
+            # token order: LEGACY_TOKEN (principal), fallback typo'd API_PERSONAL_ACESS_TOKEN, then PERSONAL_TOKEN
+            token = os.getenv('LEGACY_TOKEN') or os.getenv('API_PERSONAL_ACESS_TOKEN') or os.getenv('PERSONAL_TOKEN')
             def fetch_url(url, use_auth=False):
                 headers = {'Authorization': f'Token {token}'} if (use_auth and token) else None
                 resp = requests.get(url, timeout=30, headers=headers)

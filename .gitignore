@@ -11,8 +11,12 @@ __pycache__/
 *.log
 logs/
 
-# Checkpoints / models (LFS tracks the real ones)
-checkpoints/
+# Checkpoints / models 
+*checkpoints/*
+!*checkpoints/*.pt
+
+# YOLO models (pretrained weights)
+label-studio-ml-backend/label_studio_ml/examples/yolov11/models/
 
 # Temp
 *.tmp

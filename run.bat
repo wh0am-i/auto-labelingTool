@@ -91,35 +91,62 @@ if "%LEGACY_TOKEN%"=="" (
     )
 )
 
-if "%MODEL_CHECKPOINT%"=="" (
-    echo.
-    set /p "IN_CP=[CONFIGURACAO] Caminho Checkpoint (Enter para padrao): "
-    if "!IN_CP!"=="" ( set "MODEL_CHECKPOINT=label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image\checkpoints\sam2.1_hiera_large.pt" ) else ( set "MODEL_CHECKPOINT=!IN_CP!" )
-    echo MODEL_CHECKPOINT=!MODEL_CHECKPOINT!>> "%ENV_FILE%"
-)
-
-if "%MODEL_CONFIG%"=="" (
-    echo.
-    set /p "IN_CFG=[CONFIGURACAO] Nome do Model Config (Enter para padrao): "
-    if "!IN_CFG!"=="" ( set "MODEL_CONFIG=sam2.1/sam2.1_hiera_l" ) else ( set "MODEL_CONFIG=!IN_CFG!" )
-    echo MODEL_CONFIG=!MODEL_CONFIG!>> "%ENV_FILE%"
-)
-
-:: Exporta e executa
-set "LABEL_STUDIO_API_KEY=%PERSONAL_TOKEN%"
-set "PERSONAL_TOKEN=%PERSONAL_TOKEN%"
-set "LEGACY_TOKEN=%LEGACY_TOKEN%"
-
+:: Escolha de backend: 1=SAM2 (padrão)  2=YOLOv11
 echo.
-echo Iniciando Auto-labeling CLI...
-call .\labelStudioVenv\Scripts\activate.bat
-pushd .\label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image
-set "LABEL_STUDIO_URL=%LABEL_STUDIO_URL%"
-set "DEVICE=%DEVICE%"
-python auto_label_cli.py
-popd
-pause
-goto menu
+set /p "IN_BACK=[CONFIGURACAO] Escolha backend: 1) SAM2  2) YOLOv11  (Enter = 1): "
+if "%IN_BACK%"=="2" (
+    :: YOLO flow: garante modelo e executa o CLI em examples\yolov11
+    if "%YOLO_MODEL_PATH%"=="" (
+        set "YOLO_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11\models\best.pt"
+        echo YOLO_MODEL_PATH=!YOLO_MODEL_PATH!>> "%ENV_FILE%"
+    )
+    if not exist "%YOLO_MODEL_PATH%" (
+        echo YOLO model nao encontrado em %YOLO_MODEL_PATH%. Tentando baixar...
+        call .\labelStudioVenv\Scripts\activate.bat
+        python .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_yolo_model.py
+    )
+    echo.
+    echo Iniciando Auto-labeling CLI (YOLOv11)...
+    call .\labelStudioVenv\Scripts\activate.bat
+    pushd .\label-studio-ml-backend\label_studio_ml\examples\yolov11
+    set "LABEL_STUDIO_URL=%LABEL_STUDIO_URL%"
+    set "DEVICE=%DEVICE%"
+    python auto_label_cli.py
+    popd
+    pause
+    goto menu
+) else (
+    :: SAM2 flow (default)
+    if "%MODEL_CHECKPOINT%"=="" (
+        echo.
+        set /p "IN_CP=[CONFIGURACAO] Caminho Checkpoint (Enter para padrao): "
+        if "!IN_CP!"=="" ( set "MODEL_CHECKPOINT=label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image\checkpoints\sam2.1_hiera_large.pt" ) else ( set "MODEL_CHECKPOINT=!IN_CP!" )
+        echo MODEL_CHECKPOINT=!MODEL_CHECKPOINT!>> "%ENV_FILE%"
+    )
+
+    if "%MODEL_CONFIG%"=="" (
+        echo.
+        set /p "IN_CFG=[CONFIGURACAO] Nome do Model Config (Enter para padrao): "
+        if "!IN_CFG!"=="" ( set "MODEL_CONFIG=sam2.1/sam2.1_hiera_l" ) else ( set "MODEL_CONFIG=!IN_CFG!" )
+        echo MODEL_CONFIG=!MODEL_CONFIG!>> "%ENV_FILE%"
+    )
+
+    :: Exporta e executa
+    set "LABEL_STUDIO_API_KEY=%PERSONAL_TOKEN%"
+    set "PERSONAL_TOKEN=%PERSONAL_TOKEN%"
+    set "LEGACY_TOKEN=%LEGACY_TOKEN%"
+
+    echo.
+    echo Iniciando Auto-labeling CLI (SAM2)...
+    call .\labelStudioVenv\Scripts\activate.bat
+    pushd .\label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image
+    set "LABEL_STUDIO_URL=%LABEL_STUDIO_URL%"
+    set "DEVICE=%DEVICE%"
+    python auto_label_cli.py
+    popd
+    pause
+    goto menu
+)
 
 :stop_servers
 taskkill /FI "WINDOWTITLE eq Label Studio*" /T /F

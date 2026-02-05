@@ -16,7 +16,7 @@ import re
 # Carrega .env automaticamente se existir (caminho do projeto)
 def load_env_paths():
     candidates = [
-        os.path.expanduser('~/Documentos/labelStudio/.env'),
+        os.path.expanduser('../../../../.env'),
         os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env'),
         os.path.join(os.path.dirname(__file__), '.env'),
     ]
@@ -94,13 +94,18 @@ else:
 # Checkpoint candidates (absolute paths)
 candidates_ckpt = []
 if DEFAULT_CHECKPOINT_NAME:
-    # only build candidate list from provided env value(s)
-    if os.path.isabs(DEFAULT_CHECKPOINT_NAME):
+    # If the provided env value is already absolute or exists as given, prefer it
+    if os.path.isabs(DEFAULT_CHECKPOINT_NAME) or os.path.exists(DEFAULT_CHECKPOINT_NAME):
         candidates_ckpt.append(DEFAULT_CHECKPOINT_NAME)
+
+    # Use basename to avoid nested duplicated paths when joining directories
+    ckpt_basename = os.path.basename(DEFAULT_CHECKPOINT_NAME)
     candidates_ckpt.extend([
-        os.path.join(EXAMPLES_DIR, 'checkpoints', DEFAULT_CHECKPOINT_NAME),
-        os.path.join(PLUGIN_DIR, 'checkpoints', DEFAULT_CHECKPOINT_NAME),
-        os.path.join(EXAMPLES_DIR, DEFAULT_CHECKPOINT_NAME),
+        os.path.join(EXAMPLES_DIR, 'checkpoints', ckpt_basename),
+        os.path.join(PLUGIN_DIR, 'checkpoints', ckpt_basename),
+        os.path.join(EXAMPLES_DIR, ckpt_basename),
+        DEFAULT_CHECKPOINT_NAME,  # allow relative path as provided
+        os.path.abspath(DEFAULT_CHECKPOINT_NAME),
     ])
 
 RESOLVED_MODEL_CHECKPOINT = find_existing_path(*[c for c in candidates_ckpt if c])
@@ -109,7 +114,7 @@ RESOLVED_MODEL_CHECKPOINT = find_existing_path(*[c for c in candidates_ckpt if c
 def load_classes_config():
     """Carrega configuração de classes do arquivo sam2_classes.json"""
     candidates = [
-        os.path.expanduser('~/Documentos/labelStudio/sam2_classes.json'),
+        os.path.expanduser('../../../../sam2_classes.json'),
         os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sam2_classes.json'),
         os.path.join(os.path.dirname(__file__), 'sam2_classes.json'),
     ]

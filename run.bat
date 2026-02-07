@@ -1,22 +1,14 @@
 @echo off
-:: O 'setlocal' limita as variáveis a esta execução, mas para garantir 
-:: o reset total após deletar o .env, limpamos manualmente abaixo.
 setlocal enabledelayedexpansion
 
-:: --- LIMPEZA DE MEMÓRIA (Garante que não 'lembre' de execuções anteriores no mesmo terminal) ---
-set "DEVICE="
-set "LABEL_STUDIO_URL="
-set "PERSONAL_TOKEN="
-set "LEGACY_TOKEN="
-set "MODEL_CHECKPOINT="
-set "MODEL_CONFIG="
+:: --- LIMPEZA DE MEMÓRIA ---
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH="
 
 set "ENV_FILE=.env"
 
 :init_config
 if not exist "%ENV_FILE%" type nul > "%ENV_FILE%"
 
-:: Carrega variáveis do .env (se ele existir e tiver conteúdo)
 for /f "usebackq tokens=*" %%i in ("%ENV_FILE%") do (
     set "line=%%i"
     if "!line:~0,1!" neq "#" if not "!line!"=="" (
@@ -25,7 +17,6 @@ for /f "usebackq tokens=*" %%i in ("%ENV_FILE%") do (
 )
 
 :: --- CONFIGURAÇÃO INICIAL ---
-
 if "%DEVICE%"=="" (
     echo.
     set /p "IN_DEV=[CONFIGURACAO] Dispositivo (cpu / cuda): "
@@ -45,7 +36,7 @@ if "%LABEL_STUDIO_URL%"=="" (
 :menu
 cls
 echo ========================================
-echo        Label Studio + SAM2 Menu
+echo         Label Studio + SAM2 Menu
 echo ========================================
 echo CONFIG ATUAL: %DEVICE% ^| %LABEL_STUDIO_URL%
 echo ========================================
@@ -55,98 +46,82 @@ echo 3. Parar servidores
 echo 4. Resetar configuracoes (.env)
 echo 5. Sair
 echo ========================================
+set "choice="
 set /p "choice=Escolha uma opcao (1-5): "
 
-if "%choice%"=="1" goto start_servers
-if "%choice%"=="2" goto auto_label
-if "%choice%"=="3" goto stop_servers
-if "%choice%"=="4" goto reset_env
-if "%choice%"=="5" exit
+if "!choice!"=="1" goto start_servers
+if "!choice!"=="2" goto auto_label
+if "!choice!"=="3" goto stop_servers
+if "!choice!"=="4" goto reset_env
+if "!choice!"=="5" exit
 goto menu
 
 :start_servers
-start "Backend SAM2" cmd /k "call .\labelStudioVenv\Scripts\activate.bat && cd .\label-studio-ml-backend\label_studio_ml\examples\ && set DEVICE=%DEVICE%&& set LABEL_STUDIO_URL=%LABEL_STUDIO_URL%&& label-studio-ml start ./segment_anything_2_image"
-start "Label Studio" cmd /k "call .\labelStudioVenv\Scripts\activate.bat && label-studio start"
+:: Inicia os servidores em janelas separadas usando Delayed Expansion
+start "Backend SAM2" cmd /k "call ".\labelStudioVenv\Scripts\activate.bat" && cd ".\label-studio-ml-backend\label_studio_ml\examples\" && set "DEVICE=!DEVICE!" && set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!" && label-studio-ml start ./segment_anything_2_image"
+start "Label Studio" cmd /k "call ".\labelStudioVenv\Scripts\activate.bat" && label-studio start"
 goto menu
 
 :auto_label
-:: Agora, se o .env foi deletado e as variáveis limpas no topo, 
-:: ele OBRIGATORIAMENTE entrará nestes IFs abaixo:
-
-if "%PERSONAL_TOKEN%"=="" (
-    echo.
+:: Tokens
+if "!PERSONAL_TOKEN!"=="" (
     set /p "IN_PT=[CONFIGURACAO] Informe o PERSONAL_TOKEN: "
-    if not "!IN_PT!"=="" (
-        set "PERSONAL_TOKEN=!IN_PT!"
-        echo PERSONAL_TOKEN=!PERSONAL_TOKEN!>> "%ENV_FILE%"
-    )
+    if not "!IN_PT!"=="" ( set "PERSONAL_TOKEN=!IN_PT!" & echo PERSONAL_TOKEN=!PERSONAL_TOKEN!>> "%ENV_FILE%" )
 )
-
-if "%LEGACY_TOKEN%"=="" (
-    echo.
+if "!LEGACY_TOKEN!"=="" (
     set /p "IN_LT=[CONFIGURACAO] Informe o LEGACY_TOKEN: "
-    if not "!IN_LT!"=="" (
-        set "LEGACY_TOKEN=!IN_LT!"
-        echo LEGACY_TOKEN=!LEGACY_TOKEN!>> "%ENV_FILE%"
-    )
+    if not "!IN_LT!"=="" ( set "LEGACY_TOKEN=!IN_LT!" & echo LEGACY_TOKEN=!LEGACY_TOKEN!>> "%ENV_FILE%" )
 )
 
-:: Escolha de backend: 1=SAM2 (padrão)  2=YOLOv11
 echo.
+set "IN_BACK=1"
 set /p "IN_BACK=[CONFIGURACAO] Escolha backend: 1) SAM2  2) YOLOv11  (Enter = 1): "
-if "%IN_BACK%"=="2" (
-    :: YOLO flow: garante modelo e executa o CLI em examples\yolov11
-    if "%YOLO_MODEL_PATH%"=="" (
-        set "YOLO_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11\models\best.pt"
-        echo YOLO_MODEL_PATH=!YOLO_MODEL_PATH!>> "%ENV_FILE%"
-    )
-    if not exist "%YOLO_MODEL_PATH%" (
-        echo YOLO model nao encontrado em %YOLO_MODEL_PATH%. Tentando baixar...
-        call .\labelStudioVenv\Scripts\activate.bat
-        python .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_yolo_model.py
-    )
-    echo.
-    echo Iniciando Auto-labeling CLI (YOLOv11)...
-    call .\labelStudioVenv\Scripts\activate.bat
-    pushd .\label-studio-ml-backend\label_studio_ml\examples\yolov11
-    set "LABEL_STUDIO_URL=%LABEL_STUDIO_URL%"
-    set "DEVICE=%DEVICE%"
-    python auto_label_cli.py
-    popd
-    pause
-    goto menu
-) else (
-    :: SAM2 flow (default)
-    if "%MODEL_CHECKPOINT%"=="" (
-        echo.
-        set /p "IN_CP=[CONFIGURACAO] Caminho Checkpoint (Enter para padrao): "
-        if "!IN_CP!"=="" ( set "MODEL_CHECKPOINT=label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image\checkpoints\sam2.1_hiera_large.pt" ) else ( set "MODEL_CHECKPOINT=!IN_CP!" )
-        echo MODEL_CHECKPOINT=!MODEL_CHECKPOINT!>> "%ENV_FILE%"
-    )
 
-    if "%MODEL_CONFIG%"=="" (
-        echo.
-        set /p "IN_CFG=[CONFIGURACAO] Nome do Model Config (Enter para padrao): "
-        if "!IN_CFG!"=="" ( set "MODEL_CONFIG=sam2.1/sam2.1_hiera_l" ) else ( set "MODEL_CONFIG=!IN_CFG!" )
-        echo MODEL_CONFIG=!MODEL_CONFIG!>> "%ENV_FILE%"
-    )
+:: O segredo: Saímos do bloco IF/ELSE principal para evitar o erro de parsing
+if "!IN_BACK!"=="2" goto flow_yolo
+goto flow_sam2
 
-    :: Exporta e executa
-    set "LABEL_STUDIO_API_KEY=%PERSONAL_TOKEN%"
-    set "PERSONAL_TOKEN=%PERSONAL_TOKEN%"
-    set "LEGACY_TOKEN=%LEGACY_TOKEN%"
-
-    echo.
-    echo Iniciando Auto-labeling CLI (SAM2)...
-    call .\labelStudioVenv\Scripts\activate.bat
-    pushd .\label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image
-    set "LABEL_STUDIO_URL=%LABEL_STUDIO_URL%"
-    set "DEVICE=%DEVICE%"
-    python auto_label_cli.py
-    popd
-    pause
-    goto menu
+:flow_yolo
+if "!YOLO_MODEL_PATH!"=="" (
+    set "YOLO_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\models\best.pt"
+    echo YOLO_MODEL_PATH=!YOLO_MODEL_PATH!>> "%ENV_FILE%"
 )
+if not exist "!YOLO_MODEL_PATH!" (
+    echo YOLO model nao encontrado. Tentando baixar...
+    call ".\labelStudioVenv\Scripts\activate.bat"
+    python ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_yolo_model.py"
+)
+echo Iniciando Auto-labeling CLI (YOLOv11)...
+call ".\labelStudioVenv\Scripts\activate.bat"
+pushd ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate"
+set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!"
+set "DEVICE=!DEVICE!"
+python auto_label_cli.py
+popd
+pause
+goto menu
+
+:flow_sam2
+if "!MODEL_CHECKPOINT!"=="" (
+    set /p "IN_CP=[CONFIGURACAO] Caminho Checkpoint (Enter para padrao): "
+    if "!IN_CP!"=="" ( set "MODEL_CHECKPOINT=label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image\checkpoints\sam2.1_hiera_large.pt" ) else ( set "MODEL_CHECKPOINT=!IN_CP!" )
+    echo MODEL_CHECKPOINT=!MODEL_CHECKPOINT!>> "%ENV_FILE%"
+)
+if "!MODEL_CONFIG!"=="" (
+    set /p "IN_CFG=[CONFIGURACAO] Nome do Model Config (Enter para padrao): "
+    if "!IN_CFG!"=="" ( set "MODEL_CONFIG=sam2.1/sam2.1_hiera_l" ) else ( set "MODEL_CONFIG=!IN_CFG!" )
+    echo MODEL_CONFIG=!MODEL_CONFIG!>> "%ENV_FILE%"
+)
+set "LABEL_STUDIO_API_KEY=!PERSONAL_TOKEN!"
+echo Iniciando Auto-labeling CLI (SAM2)...
+call ".\labelStudioVenv\Scripts\activate.bat"
+pushd ".\label-studio-ml-backend\label_studio_ml\examples\segment_anything_2_image"
+set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!"
+set "DEVICE=!DEVICE!"
+python auto_label_cli.py
+popd
+pause
+goto menu
 
 :stop_servers
 taskkill /FI "WINDOWTITLE eq Label Studio*" /T /F
@@ -157,6 +132,5 @@ goto menu
 :reset_env
 echo Apagando configuracoes e limpando memoria...
 if exist "%ENV_FILE%" del "%ENV_FILE%"
-:: Limpa as variáveis da sessão atual para forçar novas perguntas
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH="
 goto init_config

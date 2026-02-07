@@ -1,13 +1,47 @@
-"""
-Deprecated module stub.
+import os
+import logging
+import json
+from uuid import uuid4
+import requests
+from io import BytesIO
+from PIL import Image
+import numpy as np
+import threading
+import time
+try:
+    import torch
+except Exception:
+    torch = None
+try:
+    import cv2
+except Exception:
+    cv2 = None
 
-The `label_studio_ml/examples/yolov11` example was renamed to
-`label_studio_ml/examples/yolov11-plate`. This file is kept as a stub
-to avoid accidental imports from the old path. Please use the
-`yolov11-plate` example instead.
-"""
+from label_studio_ml.model import LabelStudioMLBase
+from label_studio_sdk import Client
 
-raise ImportError("Deprecated: use label_studio_ml/examples/yolov11-plate/model.py instead")
+logger = logging.getLogger(__name__)
+
+
+def load_classes_config():
+    candidates = [
+        os.path.expanduser('../../../../sam2_classes.json'),
+        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sam2_classes.json'),
+        os.path.join(os.path.dirname(__file__), 'sam2_classes.json'),
+        os.path.abspath(os.path.join(os.getcwd(), 'sam2_classes.json')),
+    ]
+    for p in candidates:
+        p = os.path.abspath(p)
+        if os.path.isfile(p):
+            try:
+                with open(p, 'r') as f:
+                    cfg = json.load(f)
+                logger.info(f"Carregado arquivo de classes: {p}")
+                return cfg
+            except Exception as e:
+                logger.warning(f"Erro ao carregar {p}: {e}")
+    logger.warning("Arquivo sam2_classes.json não encontrado. Usando fallback simples.")
+    return {"classes": [], "filtering_rules": {"enabled": False}}
 
 
 def load_image_from_url(url):
@@ -175,10 +209,10 @@ class NewModel(LabelStudioMLBase):
         img = load_image_from_url(image_url)
         w, h = img.size
         yolo = self._load_yolo()
-        # configurable thresholds (env vars) - make defaults more permissive to detect small/multiple objects
-        conf = float(os.getenv('YOLO_CONF', 0.08))
-        iou = float(os.getenv('YOLO_IOU', 0.60))
-        max_det = int(os.getenv('YOLO_MAX_DET', 500))
+        # configurable thresholds (env vars) - defaults more permissive to detect small/multiple objects
+        conf = float(os.getenv('YOLO_CONF', 0.10))
+        iou = float(os.getenv('YOLO_IOU', 0.45))
+        max_det = int(os.getenv('YOLO_MAX_DET', 300))
 
         # Chamada para YOLOv11 (OBB)
         try:
@@ -195,27 +229,6 @@ class NewModel(LabelStudioMLBase):
             logger.debug(f'Result attributes presence: {attrs}')
         except Exception:
             logger.debug('Não foi possível inspecionar atributos de result')
-
-        # Debug: inspecionar shapes/arrays de boxes/masks quando disponíveis
-        try:
-            if hasattr(res, 'boxes') and res.boxes is not None:
-                try:
-                    xy = res.boxes.xyxy.cpu().numpy()
-                    confs = res.boxes.conf.cpu().numpy()
-                    cls = res.boxes.cls.cpu().numpy()
-                    logger.debug('res.boxes present: %s boxes; confs(top5)=%s; cls(top5)=%s', xy.shape[0], confs[:5].tolist() if confs.size>0 else [], cls[:5].tolist() if cls.size>0 else [])
-                except Exception as e:
-                    logger.debug('res.boxes present but failed to read arrays: %s', e)
-            if hasattr(res, 'obb') and res.obb is not None:
-                try:
-                    obb_len = len(res.obb)
-                    logger.debug('res.obb present: %d', obb_len)
-                except Exception:
-                    logger.debug('res.obb present (len unreadable)')
-            if hasattr(res, 'masks') and res.masks is not None:
-                logger.debug('res.masks present')
-        except Exception:
-            pass
 
         predictions_data = []
         try:
@@ -335,39 +348,6 @@ class NewModel(LabelStudioMLBase):
                         width_pct = float(((x2 - x1) / w) * 100.0)
                         height_pct = float(((y2 - y1) / h) * 100.0)
                         rotation_deg = 0.0
-                    
-                            # Tentativa de derivar OBB a partir do patch da caixa (Canny -> minAreaRect)
-                            try:
-                                if cv2 is not None:
-                                    # crop patch in pixel coords
-                                    x1_px = max(0, int(round(x1)))
-                                    y1_px = max(0, int(round(y1)))
-                                    x2_px = min(w, int(round(x2)))
-                                    y2_px = min(h, int(round(y2)))
-                                    if x2_px > x1_px and y2_px > y1_px:
-                                        arr = np.array(img)
-                                        patch = arr[y1_px:y2_px, x1_px:x2_px]
-                                        if patch.size != 0:
-                                            gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
-                                            blur = cv2.GaussianBlur(gray, (5,5), 0)
-                                            edges = cv2.Canny(blur, 50, 150)
-                                            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                            if contours:
-                                                largest = max(contours, key=cv2.contourArea)
-                                                if cv2.contourArea(largest) > 10:
-                                                    rect = cv2.minAreaRect(largest)
-                                                    ((cx_p, cy_p), (bw_px, bh_px), angle) = rect
-                                                    # convert to global coords
-                                                    cx = x1_px + cx_p
-                                                    cy = y1_px + cy_p
-                                                    rotation_deg = float(angle)
-                                                    width_pct = float((bw_px / w) * 100.0)
-                                                    height_pct = float((bh_px / h) * 100.0)
-                                                    x_pct = float(((cx - bw_px/2) / w) * 100.0)
-                                                    y_pct = float(((cy - bh_px/2) / h) * 100.0)
-                                                    logger.debug('OBB derivado do patch: angle=%.2f bw=%d bh=%d', rotation_deg, int(bw_px), int(bh_px))
-                            except Exception as e:
-                                logger.debug('Erro derivando OBB do patch: %s', e)
                 except Exception as e:
                     logger.debug('Erro extraindo coords de det %d: %s', idx, e)
                     continue

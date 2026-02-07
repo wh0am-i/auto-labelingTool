@@ -121,16 +121,16 @@ auto_label() {
 
     if [ "$BACKEND" = "2" ] || [ "$BACKEND" = "yolo" ] || [ "$BACKEND" = "YOLO" ]; then
         # Ensure YOLO model is present (attempt download if missing)
-        export YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-"label-studio-ml-backend/label_studio_ml/examples/yolov11/models/best.pt"}
+        export YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-"label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/models/best.pt"}
         if [ ! -f "$YOLO_MODEL_PATH" ]; then
             echo "YOLO model não encontrado em $YOLO_MODEL_PATH. Tentando baixar..."
             source ./labelStudioVenv/bin/activate
-            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11/download_yolo_model.py
+            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/download_yolo_model.py
         fi
 
         echo "Iniciando Auto-labeling CLI (YOLOv11)..."
         source ./labelStudioVenv/bin/activate
-        pushd ./label-studio-ml-backend/label_studio_ml/examples/yolov11 > /dev/null
+        pushd ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate > /dev/null
         python3 auto_label_cli.py
         popd > /dev/null
         read -p "Pressione Enter para continuar..."

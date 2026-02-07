@@ -3,7 +3,7 @@ import os
 import requests
 import sys
 
-DEFAULT_URL = os.getenv('YOLO_MODEL_URL') or 'https://huggingface.co/felipedutrain/placa-br-yolov11/resolve/main/best.pt'
+DEFAULT_URL = os.getenv('YOLO_MODEL_URL') or 'https://huggingface.co/felipedutrain/placa-br-yolov11-plate/resolve/main/best.pt'
 OUT_DIR = os.path.join(os.path.dirname(__file__), 'models')
 OUT_PATH = os.path.join(OUT_DIR, 'best.pt')
 

@@ -36,3 +36,6 @@ config.json
 
 # Continue
 .continue/
+
+# Others
+*.png

@@ -8,6 +8,7 @@ from PIL import Image
 import numpy as np
 import threading
 import time
+from datetime import datetime
 try:
     import torch
 except Exception:
@@ -361,6 +362,88 @@ class NewModel(LabelStudioMLBase):
                 })
 
             logger.debug('Predictions_data length after parsing items: %d', len(predictions_data))
+            # schedule async debug dump to avoid blocking main flow (controlled by DEBUG_DUMP env)
+            try:
+                if os.getenv('DEBUG_DUMP', '0') == '1':
+                    t = threading.Thread(target=self._async_debug_dump, args=(image_url, img, res, predictions_data), daemon=True)
+                    t.start()
+            except Exception as e:
+                logger.debug('Erro iniciando debug thread: %s', e)
+            # Tiling fallback: se poucas detecções, tentar detectar em tiles (útil para placas pequenas/distantes)
+            try:
+                do_tiling = (len(predictions_data) < 3 and w > 800)
+                if os.getenv('YOLO_FORCE_TILE', '0') == '1':
+                    do_tiling = True
+                if do_tiling:
+                    logger.info('Executando detecção por tiles (fallback)')
+                    tile_size = int(os.getenv('YOLO_TILE_SIZE', '800'))
+                    overlap = float(os.getenv('YOLO_TILE_OVERLAP', '0.25'))
+                    stride = int(tile_size * (1 - overlap))
+                    img_arr = np.array(img)
+                    all_boxes = []
+                    all_scores = []
+                    all_cls = []
+                    for y0 in range(0, max(1, h - 1), max(1, stride)):
+                        for x0 in range(0, max(1, w - 1), max(1, stride)):
+                            x1 = x0 + tile_size
+                            y1_ = y0 + tile_size
+                            x2 = min(w, x1)
+                            y2 = min(h, y1_)
+                            # crop tile as PIL Image
+                            tile = Image.fromarray(img_arr[y0:y2, x0:x2])
+                            try:
+                                tres = yolo(tile, verbose=False, conf=conf, iou=iou, max_det=max_det)
+                            except TypeError:
+                                tres = yolo(tile, verbose=False)
+                            if isinstance(tres, (list, tuple)):
+                                tres = tres[0]
+                            if hasattr(tres, 'boxes') and tres.boxes is not None:
+                                try:
+                                    tb = tres.boxes.xyxy.cpu().numpy()
+                                    tc = tres.boxes.cls.cpu().numpy()
+                                    ts = tres.boxes.conf.cpu().numpy()
+                                    for b, cls_idx, sc in zip(tb, tc, ts):
+                                        # map to global coords
+                                        bx1, by1, bx2, by2 = b.tolist()
+                                        gx1 = bx1 + x0
+                                        gy1 = by1 + y0
+                                        gx2 = bx2 + x0
+                                        gy2 = by2 + y0
+                                        all_boxes.append([gx1, gy1, gx2, gy2])
+                                        all_scores.append(float(sc))
+                                        all_cls.append(int(cls_idx))
+                                except Exception:
+                                    pass
+                    # apply NMS on aggregated boxes
+                    if all_boxes:
+                        keep_idx = self._nms_boxes(all_boxes, all_scores, iou_threshold=float(os.getenv('YOLO_TILE_NMS_IOU', '0.3')))
+                        new_preds = []
+                        img_arr_full = np.array(img)
+                        for i in keep_idx:
+                            bx1, by1, bx2, by2 = all_boxes[i]
+                            sc = all_scores[i]
+                            cls_idx = all_cls[i]
+                            name = tres.names.get(cls_idx, str(cls_idx)) if 'tres' in locals() and hasattr(tres, 'names') else str(cls_idx)
+                            label = self._map_label_by_name(name) or self._determine_class_by_area(((bx2-bx1)*(by2-by1))/(w*h) if w*h>0 else 0)
+                            # attempt derive OBB from patch
+                            obb = self._derive_obb_from_patch(img_arr_full, bx1, by1, bx2, by2)
+                            if obb:
+                                obb['score'] = sc
+                                obb['label'] = label
+                                obb['orig_w'] = w
+                                obb['orig_h'] = h
+                                new_preds.append(obb)
+                            else:
+                                x_pct = float((bx1 / w) * 100.0)
+                                y_pct = float((by1 / h) * 100.0)
+                                width_pct = float(((bx2 - bx1) / w) * 100.0)
+                                height_pct = float(((by2 - by1) / h) * 100.0)
+                                new_preds.append({'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': 0.0, 'score': sc, 'label': label, 'orig_w': w, 'orig_h': h})
+                        if new_preds:
+                            logger.info('Tiles produced %d candidates, keeping %d after NMS', len(all_boxes), len(new_preds))
+                            predictions_data = new_preds
+            except Exception as e:
+                logger.debug('Erro durante tiling fallback: %s', e)
         except Exception as e:
             logger.error('Erro ao interpretar resultados YOLO: %s', e)
             raise
@@ -373,7 +456,244 @@ class NewModel(LabelStudioMLBase):
             items = res.boxes
 
         return {'items': predictions_data, 'width': w, 'height': h}
+
+    def _nms_boxes(self, boxes, scores, iou_threshold=0.3):
+        """Simple NMS for xyxy boxes. boxes: Nx4 array, scores: N array."""
+        if len(boxes) == 0:
+            return []
+        boxes = np.array(boxes, dtype=float)
+        scores = np.array(scores, dtype=float)
+        x1 = boxes[:,0]
+        y1 = boxes[:,1]
+        x2 = boxes[:,2]
+        y2 = boxes[:,3]
+        areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            w = np.maximum(0.0, xx2 - xx1 + 1)
+            h = np.maximum(0.0, yy2 - yy1 + 1)
+            inter = w * h
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(ovr <= iou_threshold)[0]
+            order = order[inds + 1]
+        return keep
+
+    def _derive_obb_from_patch(self, img_arr, x1_px, y1_px, x2_px, y2_px):
+        """Try derive oriented bbox from a cropped patch using contours/minAreaRect."""
+        if cv2 is None:
+            return None
+        try:
+            img_h, img_w = img_arr.shape[:2]
+            x1_px = max(0, int(x1_px))
+            y1_px = max(0, int(y1_px))
+            x2_px = min(img_w - 1, int(x2_px))
+            y2_px = min(img_h - 1, int(y2_px))
+            if x2_px <= x1_px or y2_px <= y1_px:
+                return None
+            patch = img_arr[y1_px:y2_px, x1_px:x2_px]
+            if patch.size == 0:
+                return None
+            gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
+            blur = cv2.GaussianBlur(gray, (5,5), 0)
+            _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,3))
+            closed = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel)
+            contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                edges = cv2.Canny(blur, 50, 150)
+                contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if not contours:
+                    return None
+            largest = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(largest) < 20:
+                return None
+            rect = cv2.minAreaRect(largest)
+            # rect: ((cx,cy),(bw,bh), angle)
+            (cx_p, cy_p), (bw_px, bh_px), angle = rect
+            # translate center to global coords
+            cx = x1_px + cx_p
+            cy = y1_px + cy_p
+            # normalize angle/size: OpenCV angle convention requires normalization
+            # ensure bw_px is width along the rotated box reference
+            if bw_px < bh_px:
+                # swap to keep bw_px >= bh_px and adjust angle
+                bw_px, bh_px = bh_px, bw_px
+                angle = angle + 90.0
+            # normalize angle to [-180,180)
+            while angle >= 180.0:
+                angle -= 360.0
+            while angle < -180.0:
+                angle += 360.0
+
+            # compute top-left from center (consistent with upstream xywhr handling)
+            if img_w == 0 or img_h == 0:
+                return None
+            x_pct = float(((cx - bw_px / 2.0) / img_w) * 100.0)
+            y_pct = float(((cy - bh_px / 2.0) / img_h) * 100.0)
+            width_pct = float((bw_px / img_w) * 100.0)
+            height_pct = float((bh_px / img_h) * 100.0)
+            rotation_deg = float(angle)
+            return {'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': rotation_deg}
+        except Exception:
+            return None
     
+    def _async_debug_dump(self, image_url, img, res, predictions_data):
+        try:
+            debug_root = os.path.join(os.path.dirname(__file__), 'debug')
+            os.makedirs(debug_root, exist_ok=True)
+
+            # maintain a run counter to create a subfolder per execution
+            counter_file = os.path.join(debug_root, 'run_counter.txt')
+            try:
+                if os.path.exists(counter_file):
+                    with open(counter_file, 'r') as cf:
+                        cnt = int(cf.read().strip() or '0')
+                else:
+                    cnt = 0
+            except Exception:
+                cnt = 0
+            cnt += 1
+            try:
+                with open(counter_file + '.tmp', 'w') as cf:
+                    cf.write(str(cnt))
+                os.replace(counter_file + '.tmp', counter_file)
+            except Exception:
+                try:
+                    with open(counter_file, 'w') as cf:
+                        cf.write(str(cnt))
+                except Exception:
+                    pass
+
+            run_name = f"run_{cnt:04d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            run_dir = os.path.join(debug_root, run_name)
+            os.makedirs(run_dir, exist_ok=True)
+
+            try:
+                base_name = os.path.splitext(os.path.basename(image_url))[0]
+            except Exception:
+                base_name = 'img'
+            uid = str(uuid4())[:8]
+            debug_base = f"{base_name}_{uid}"
+
+            dump = {'predictions_data': predictions_data}
+
+            # Safely try to read raw attributes
+            try:
+                if hasattr(res, 'boxes') and getattr(res, 'boxes') is not None:
+                    try:
+                        bx = getattr(res.boxes, 'xyxy', None)
+                        if bx is not None:
+                            dump['raw_boxes_xyxy'] = bx.cpu().numpy().tolist()
+                        conf = getattr(res.boxes, 'conf', None)
+                        if conf is not None:
+                            dump['raw_boxes_conf'] = conf.cpu().numpy().tolist()
+                        cls = getattr(res.boxes, 'cls', None)
+                        if cls is not None:
+                            dump['raw_boxes_cls'] = cls.cpu().numpy().tolist()
+                    except Exception:
+                        dump['raw_boxes_repr'] = str(res.boxes)
+                if hasattr(res, 'obb') and getattr(res, 'obb') is not None:
+                    try:
+                        dump['raw_obb'] = []
+                        for o in res.obb:
+                            try:
+                                dump['raw_obb'].append(o.cpu().numpy().tolist())
+                            except Exception:
+                                dump['raw_obb'].append(str(o))
+                    except Exception:
+                        dump['raw_obb_repr'] = str(res.obb)
+                if hasattr(res, 'masks') and getattr(res, 'masks') is not None:
+                    try:
+                        m = getattr(res.masks, 'data', None)
+                        if m is not None:
+                            dump['masks_shape'] = m.cpu().numpy().shape
+                        else:
+                            dump['masks_repr'] = str(res.masks)
+                    except Exception:
+                        dump['masks_error'] = 'failed to read masks'
+            except Exception:
+                dump['raw_error'] = 'failed to introspect res'
+
+            # atomic json write
+            json_path = os.path.join(run_dir, debug_base + '.json')
+            tmp_json = json_path + '.tmp'
+            try:
+                with open(tmp_json, 'w', encoding='utf8') as jf:
+                    json.dump(dump, jf, indent=2, ensure_ascii=False)
+                os.replace(tmp_json, json_path)
+            except Exception:
+                try:
+                    if os.path.exists(tmp_json):
+                        os.remove(tmp_json)
+                except Exception:
+                    pass
+
+            # visualization (best-effort)
+            try:
+                vis_path = os.path.join(run_dir, debug_base + '.png')
+                tmp_vis = vis_path + '.tmp.png'
+                vis_img = np.array(img).copy()
+                if cv2 is not None:
+                    for pd in predictions_data:
+                        try:
+                            x_pct = float(pd.get('x', 0))
+                            y_pct = float(pd.get('y', 0))
+                            w_pct = float(pd.get('width', 0))
+                            h_pct = float(pd.get('height', 0))
+                            rot = float(pd.get('rotation', 0) or 0)
+                            score = float(pd.get('score', 0) or 0)
+                            lbl = str(pd.get('label', ''))
+                        except Exception:
+                            continue
+                        ih, iw = vis_img.shape[0], vis_img.shape[1]
+                        x_px = int((x_pct/100.0) * iw)
+                        y_px = int((y_pct/100.0) * ih)
+                        bw_px = int((w_pct/100.0) * iw)
+                        bh_px = int((h_pct/100.0) * ih)
+                        if bw_px <= 0 or bh_px <= 0:
+                            continue
+                        if abs(rot) > 0.1:
+                            rect = ((x_px + bw_px/2, y_px + bh_px/2), (bw_px, bh_px), rot)
+                            try:
+                                box = cv2.boxPoints(rect).astype(int)
+                                cv2.drawContours(vis_img, [box], 0, (0,255,0), 2)
+                                cv2.putText(vis_img, f"{lbl}:{score:.2f}", (max(0,box[0][0]), max(0,box[0][1]-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                            except Exception:
+                                pass
+                        else:
+                            x2 = x_px + bw_px
+                            y2 = y_px + bh_px
+                            try:
+                                cv2.rectangle(vis_img, (x_px, y_px), (x2, y2), (0,255,0), 2)
+                                cv2.putText(vis_img, f"{lbl}:{score:.2f}", (x_px, max(0,y_px-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                            except Exception:
+                                pass
+                    cv2.imwrite(tmp_vis, cv2.cvtColor(vis_img, cv2.COLOR_RGB2BGR))
+                    os.replace(tmp_vis, vis_path)
+                else:
+                    # fallback: save raw image via PIL
+                    try:
+                        Image.fromarray(vis_img).save(tmp_vis, format='PNG')
+                        os.replace(tmp_vis, vis_path)
+                    except Exception:
+                        # final fallback: save without tmp
+                        try:
+                            Image.fromarray(vis_img).save(vis_path, format='PNG')
+                        except Exception:
+                            pass
+            except Exception:
+                logger.debug('Erro salvando visualizacao debug', exc_info=True)
+
+        except Exception:
+            logger.debug('Erro em _async_debug_dump', exc_info=True)
+
     def _generate_results(self, items):
         results = []
         total_score = 0.0

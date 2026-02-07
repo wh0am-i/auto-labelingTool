@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: --- LIMPEZA DE MEMÓRIA ---
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH=" & set "SELECTED_BACKEND="
 
 set "ENV_FILE=.env"
 
@@ -39,6 +39,7 @@ echo ========================================
 echo         Label Studio + SAM2 Menu
 echo ========================================
 echo CONFIG ATUAL: %DEVICE% ^| %LABEL_STUDIO_URL%
+echo BACKEND PADRAO: !SELECTED_BACKEND!
 echo ========================================
 echo 1. Iniciar servidores
 echo 2. Auto-labeling interativo
@@ -57,7 +58,6 @@ if "!choice!"=="5" exit
 goto menu
 
 :start_servers
-:: Inicia os servidores em janelas separadas usando Delayed Expansion
 start "Backend SAM2" cmd /k "call ".\labelStudioVenv\Scripts\activate.bat" && cd ".\label-studio-ml-backend\label_studio_ml\examples\" && set "DEVICE=!DEVICE!" && set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!" && label-studio-ml start ./segment_anything_2_image"
 start "Label Studio" cmd /k "call ".\labelStudioVenv\Scripts\activate.bat" && label-studio start"
 goto menu
@@ -65,38 +65,66 @@ goto menu
 :auto_label
 :: Tokens
 if "!PERSONAL_TOKEN!"=="" (
-    set /p "IN_PT=[CONFIGURACAO] Informe o PERSONAL_TOKEN: "
+    set /p "IN_PT=[CONFIGURACAO] Informe o PERSONAL_TOKEN do Label Studio: "
     if not "!IN_PT!"=="" ( set "PERSONAL_TOKEN=!IN_PT!" & echo PERSONAL_TOKEN=!PERSONAL_TOKEN!>> "%ENV_FILE%" )
 )
 if "!LEGACY_TOKEN!"=="" (
-    set /p "IN_LT=[CONFIGURACAO] Informe o LEGACY_TOKEN: "
+    set /p "IN_LT=[CONFIGURACAO] Informe o LEGACY_TOKEN do Label Studio: "
     if not "!IN_LT!"=="" ( set "LEGACY_TOKEN=!IN_LT!" & echo LEGACY_TOKEN=!LEGACY_TOKEN!>> "%ENV_FILE%" )
 )
 
-echo.
-set "IN_BACK=1"
-set /p "IN_BACK=[CONFIGURACAO] Escolha backend: 1) SAM2  2) YOLOv11  (Enter = 1): "
+:: Seleção de Backend
+if "!SELECTED_BACKEND!"=="" (
+    echo.
+    set "IN_BACK=1"
+    set /p "IN_BACK=[CONFIGURACAO] Escolha backend: 1) SAM2  2) YOLOv11 (Enter = 1): "
+    if "!IN_BACK!"=="2" ( set "SELECTED_BACKEND=YOLO" ) else ( set "SELECTED_BACKEND=SAM2" )
+    echo SELECTED_BACKEND=!SELECTED_BACKEND!>> "%ENV_FILE%"
+)
 
-:: O segredo: Saímos do bloco IF/ELSE principal para evitar o erro de parsing
-if "!IN_BACK!"=="2" goto flow_yolo
+:: Pergunta/define se debug deve estar ativo (grava em .env)
+if "!DEBUG_DUMP!"=="" (
+    set /p "IN_DBG=[CONFIGURACAO] Habilitar debug dumps (json/png)? (S/n): "
+    if /I "!IN_DBG!"=="n" (
+        set "DEBUG_DUMP=0"
+    ) else (
+        set "DEBUG_DUMP=1"
+    )
+    echo DEBUG_DUMP=!DEBUG_DUMP!>> "%ENV_FILE%"
+)
+set "DEBUG_DUMP=!DEBUG_DUMP!"
+
+if "!SELECTED_BACKEND!"=="YOLO" goto flow_yolo
 goto flow_sam2
 
 :flow_yolo
+:: --- ADICIONADO: Pedir e gravar YOLO_MODEL_PATH se não existir ---
 if "!YOLO_MODEL_PATH!"=="" (
-    set "YOLO_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\models\best.pt"
+    set /p "IN_YMP=[CONFIGURACAO] Caminho YOLO Model (Enter para padrao): "
+    if "!IN_YMP!"=="" (
+        set "YOLO_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\models\best.pt"
+    ) else (
+        set "YOLO_MODEL_PATH=!IN_YMP!"
+    )
     echo YOLO_MODEL_PATH=!YOLO_MODEL_PATH!>> "%ENV_FILE%"
 )
-if not exist "!YOLO_MODEL_PATH!" (
-    echo YOLO model nao encontrado. Tentando baixar...
-    call ".\labelStudioVenv\Scripts\activate.bat"
-    python ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_yolo_model.py"
+
+if exist "!YOLO_MODEL_PATH!" (
+    echo [SUCESSO] Modelo encontrado em: !YOLO_MODEL_PATH!
+    goto start_yolo_logic
 )
+
+echo YOLO model nao encontrado. Tentando baixar...
+call ".\labelStudioVenv\Scripts\activate.bat"
+python ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_yolo_model.py"
+
+:start_yolo_logic
 echo Iniciando Auto-labeling CLI (YOLOv11)...
 call ".\labelStudioVenv\Scripts\activate.bat"
 pushd ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate"
 set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!"
 set "DEVICE=!DEVICE!"
-python auto_label_cli.py
+python auto_label_cli.py --model_path="!YOLO_MODEL_PATH!"
 popd
 pause
 goto menu
@@ -132,5 +160,5 @@ goto menu
 :reset_env
 echo Apagando configuracoes e limpando memoria...
 if exist "%ENV_FILE%" del "%ENV_FILE%"
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH=" & set "SELECTED_BACKEND="
 goto init_config

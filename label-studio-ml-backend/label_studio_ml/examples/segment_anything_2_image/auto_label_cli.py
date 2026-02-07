@@ -164,9 +164,8 @@ def main():
     print(f"Encontradas {unlabeled_count} imagens não etiquetadas.")
     
     # Confirma início do auto-labeling
-    confirm = input(f"\nDeseja iniciar o auto-labeling de {unlabeled_count} imagens? (s/n): ").strip().lower()
-    
-    if confirm != 's':
+    confirm = input(f"\nDeseja iniciar o auto-labeling de {unlabeled_count} imagens? (S/n): ").strip().lower()
+    if confirm == 'n':
         logger.info("Auto-labeling cancelado pelo usuário")
         sys.exit(0)
     

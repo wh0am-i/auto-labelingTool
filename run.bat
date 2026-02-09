@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: --- LIMPEZA DE MEMÓRIA ---
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH=" & set "SELECTED_BACKEND="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND="
 
 set "ENV_FILE=.env"
 
@@ -98,25 +98,41 @@ if "!SELECTED_BACKEND!"=="YOLO" goto flow_yolo
 goto flow_sam2
 
 :flow_yolo
-:: --- ADICIONADO: Pedir e gravar YOLO_MODEL_PATH se não existir ---
-if "!YOLO_MODEL_PATH!"=="" (
-    set /p "IN_YMP=[CONFIGURACAO] Caminho YOLO Model (Enter para padrao): "
+:: --- CONFIGURAÇÃO YOLO PLATE ---
+if "!YOLO_PLATE_MODEL_PATH!"=="" (
+    set /p "IN_YMP=[CONFIGURACAO] Caminho YOLO Plate Model (Enter para padrao): "
     if "!IN_YMP!"=="" (
-        set "YOLO_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\models\best.pt"
+        set "YOLO_PLATE_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\models\best.pt"
     ) else (
-        set "YOLO_MODEL_PATH=!IN_YMP!"
+        set "YOLO_PLATE_MODEL_PATH=!IN_YMP!"
     )
-    echo YOLO_MODEL_PATH=!YOLO_MODEL_PATH!>> "%ENV_FILE%"
+    echo YOLO_PLATE_MODEL_PATH=!YOLO_PLATE_MODEL_PATH!>> "%ENV_FILE%"
 )
 
-if exist "!YOLO_MODEL_PATH!" (
-    echo [SUCESSO] Modelo encontrado em: !YOLO_MODEL_PATH!
-    goto start_yolo_logic
+:: --- CONFIGURAÇÃO YOLO VEHICLE (YOLOv11x) ---
+if "!YOLO_VEHICLE_MODEL_PATH!"=="" (
+    set /p "IN_YVP=[CONFIGURACAO] Caminho YOLO Vehicle Model (Enter para padrao): "
+    if "!IN_YVP!"=="" (
+        set "YOLO_VEHICLE_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11\models\yolo11x.pt"
+    ) else (
+        set "YOLO_VEHICLE_MODEL_PATH=!IN_YVP!"
+    )
+    echo YOLO_VEHICLE_MODEL_PATH=!YOLO_VEHICLE_MODEL_PATH!>> "%ENV_FILE%"
 )
 
-echo YOLO model nao encontrado. Tentando baixar...
-call ".\labelStudioVenv\Scripts\activate.bat"
-python ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_yolo_model.py"
+:: Verificação de arquivos (sem tentativa de download automatica)
+if exist "!YOLO_PLATE_MODEL_PATH!" (
+    echo [SUCESSO] Plate detector encontrado em: !YOLO_PLATE_MODEL_PATH!
+) else (
+    echo [AVISO] Plate detector nao encontrado em: !YOLO_PLATE_MODEL_PATH!
+    echo [AVISO] O backend verificará os modelos em tempo de execução.
+)
+
+if exist "!YOLO_VEHICLE_MODEL_PATH!" (
+    echo [SUCESSO] Vehicle detector encontrado em: !YOLO_VEHICLE_MODEL_PATH!
+) else (
+    echo [AVISO] Vehicle detector nao encontrado em: !YOLO_VEHICLE_MODEL_PATH!
+)
 
 :start_yolo_logic
 echo Iniciando Auto-labeling CLI (YOLOv11)...
@@ -124,7 +140,7 @@ call ".\labelStudioVenv\Scripts\activate.bat"
 pushd ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate"
 set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!"
 set "DEVICE=!DEVICE!"
-python auto_label_cli.py --model_path="!YOLO_MODEL_PATH!"
+python auto_label_cli.py --model_path="!YOLO_PLATE_MODEL_PATH!" --vehicle_model_path="!YOLO_VEHICLE_MODEL_PATH!"
 popd
 pause
 goto menu
@@ -160,5 +176,5 @@ goto menu
 :reset_env
 echo Apagando configuracoes e limpando memoria...
 if exist "%ENV_FILE%" del "%ENV_FILE%"
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_MODEL_PATH=" & set "SELECTED_BACKEND="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND="
 goto init_config

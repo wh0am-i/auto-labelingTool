@@ -17,7 +17,10 @@ try:
     import cv2
 except Exception:
     cv2 = None
-
+def get_run_dir(base_debug_dir=None):
+    if base_debug_dir is None:
+        # place debug runs at repository's label-studio-ml-backend/debug so runs and setups share the folder
+        base_debug_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'debug'))
 from label_studio_ml.model import LabelStudioMLBase
 from label_studio_sdk import Client
 
@@ -82,6 +85,7 @@ class NewModel(LabelStudioMLBase):
         self.client = Client(url=os.getenv('LABEL_STUDIO_URL'), api_key=os.getenv('LEGACY_TOKEN') or os.getenv('PERSONAL_TOKEN')) if (os.getenv('LABEL_STUDIO_URL') and (os.getenv('LEGACY_TOKEN') or os.getenv('PERSONAL_TOKEN'))) else None
         self.classes_config = load_classes_config()
         self._yolo = None
+        self._vehicle_yolo = None
         # Resolve YOLO model path: prefer absolute/expanded env var, else package-local models/best.pt
         env_path = os.getenv('YOLO_MODEL_PATH')
         candidates = []
@@ -149,6 +153,42 @@ class NewModel(LabelStudioMLBase):
             logger.error('Erro ao carregar modelo YOLO: %s', e)
             raise
         return self._yolo
+
+    def _load_vehicle_yolo(self):
+        if self._vehicle_yolo is not None:
+            return self._vehicle_yolo
+        try:
+            from ultralytics import YOLO
+        except Exception as e:
+            logger.error('ultralytics import failed for vehicle model: %s', e)
+            raise
+        # vehicle model path: allow override via env YOLO_VEHICLE_MODEL_PATH
+        veh_env = os.getenv('YOLO_VEHICLE_MODEL_PATH')
+        candidates = []
+        if veh_env:
+            candidates.append(os.path.abspath(os.path.expanduser(veh_env)))
+        # fallback to examples/yolov11/models/yolo11x.pt
+        candidates.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'yolov11', 'models', 'yolo11x.pt')))
+        found = None
+        for p in candidates:
+            if os.path.exists(p):
+                found = p
+                break
+        if not found:
+            logger.error('Vehicle YOLO model not found. Checked: %s', candidates)
+            raise FileNotFoundError('vehicle model not found')
+        try:
+            self._vehicle_yolo = YOLO(found)
+            try:
+                if hasattr(self._vehicle_yolo, 'to'):
+                    self._vehicle_yolo.to(self.device)
+            except Exception:
+                pass
+            logger.info('Loaded vehicle YOLO model %s', found)
+        except Exception as e:
+            logger.error('Failed to load vehicle YOLO model: %s', e)
+            raise
+        return self._vehicle_yolo
 
     def list_projects(self):
         if not self.client:
@@ -231,141 +271,189 @@ class NewModel(LabelStudioMLBase):
         except Exception:
             logger.debug('Não foi possível inspecionar atributos de result')
 
+        # container for parsed predictions (ensure defined before any branch)
         predictions_data = []
-        try:
-            # Verifica se existem detecções OBB primeiro
-            has_obb = hasattr(res, 'obb') and res.obb is not None
-            # Verifica se existem detecções de Boxes comuns
-            has_boxes = hasattr(res, 'boxes') and res.boxes is not None
-            
-            items = []
-            if has_obb and len(res.obb) > 0:
-                items = res.obb
-            elif has_boxes and len(res.boxes) > 0:
-                items = res.boxes
-            else:
-                # tentar fallback a partir de máscaras (quando o modelo entrega masks)
-                if hasattr(res, 'masks') and res.masks is not None and cv2 is not None:
+
+        # Verifica se existem detecções OBB primeiro
+        has_obb = hasattr(res, 'obb') and res.obb is not None
+        # Verifica se existem detecções de Boxes comuns
+        has_boxes = hasattr(res, 'boxes') and res.boxes is not None
+
+        items = []
+        if has_obb and len(res.obb) > 0:
+            items = res.obb
+        elif has_boxes and len(res.boxes) > 0:
+            items = res.boxes
+        else:
+            # tentar fallback a partir de máscaras (quando o modelo entrega masks)
+            if hasattr(res, 'masks') and res.masks is not None and cv2 is not None:
+                try:
+                    # tentar extrair masks em formato numpy (N,H,W)
+                    masks_np = None
                     try:
-                        # tentar extrair masks em formato numpy (N,H,W)
-                        masks_np = None
+                        masks_np = res.masks.data.cpu().numpy()
+                    except Exception:
                         try:
-                            masks_np = res.masks.data.cpu().numpy()
+                            masks_np = np.array(res.masks)
                         except Exception:
-                            try:
-                                masks_np = np.array(res.masks)
-                            except Exception:
-                                masks_np = None
+                            masks_np = None
 
-                        if masks_np is not None and masks_np.ndim == 3:
-                            logger.info('Fallback: gerando OBBs a partir de máscaras (%d masks)', masks_np.shape[0])
-                            for mi in range(masks_np.shape[0]):
-                                mask = (masks_np[mi].astype('uint8') * 255)
-                                # encontra contornos
-                                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                if not contours:
-                                    continue
-                                largest = max(contours, key=cv2.contourArea)
-                                if cv2.contourArea(largest) < 10:
-                                    continue
-                                rect = cv2.minAreaRect(largest)
-                                ((cx, cy), (bw, bh), angle) = rect
-                                # converter para porcentagens relativas
-                                x_pct = float(((cx - bw/2) / w) * 100.0)
-                                y_pct = float(((cy - bh/2) / h) * 100.0)
-                                width_pct = float((bw / w) * 100.0)
-                                height_pct = float((bh / h) * 100.0)
-                                rotation_deg = float(angle)
-                                # sem score/label conhecido; usar heurística de area
-                                area_frac = (bw * bh) / (w * h)
-                                label = self._determine_class_by_area(area_frac)
-                                predictions_data.append({
-                                    'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
-                                    'rotation': rotation_deg, 'score': 0.5, 'label': label,
-                                    'orig_w': w, 'orig_h': h
-                                })
-                            if predictions_data:
-                                logger.info('Fallback OBBs gerados a partir de máscaras: %d', len(predictions_data))
-                                # obter items a partir de predictions_data para geração posterior
-                                return {'items': predictions_data, 'width': w, 'height': h}
-                    except Exception as e:
-                        logger.debug('Erro no fallback de máscaras->OBB: %s', e)
-
-                logger.info("Nenhuma detecção encontrada na imagem.")
-                return {'items': [], 'width': w, 'height': h}
-            
-            # debug: número de itens antes do parsing
-            try:
-                n_items = len(items)
-            except Exception:
-                try:
-                    n_items = items.shape[0]
-                except Exception:
-                    n_items = -1
-            logger.debug('Número bruto de detecções (items): %s', n_items)
-
-            for idx, det in enumerate(items):
-                # conf / cls leitura robusta
-                try:
-                    conf = float(det.conf.item())
-                except Exception:
-                    try:
-                        conf = float(getattr(det, 'conf', 0.0))
-                    except Exception:
-                        conf = 0.0
-                try:
-                    cls_idx = int(det.cls.item())
-                except Exception:
-                    try:
-                        cls_idx = int(getattr(det, 'cls', 0))
-                    except Exception:
-                        cls_idx = 0
-                name = res.names.get(cls_idx, str(cls_idx))
-                label = self._map_label_by_name(name) or self._determine_class_by_area(0)
-
-                # Extração para OBB (Oriented Bounding Box)
-                rotation_deg = 0.0
-                x_pct = y_pct = width_pct = height_pct = 0.0
-                try:
-                    if hasattr(det, 'xywhr') and det.xywhr is not None:
-                        xywhr = det.xywhr.cpu().numpy().flatten().tolist()
-                        if len(xywhr) == 5:
-                            cx, cy, bw, bh, rotation_rad = xywhr
-                            rotation_deg = float(np.degrees(rotation_rad))
+                    if masks_np is not None and masks_np.ndim == 3:
+                        logger.info('Fallback: gerando OBBs a partir de máscaras (%d masks)', masks_np.shape[0])
+                        for mi in range(masks_np.shape[0]):
+                            mask = (masks_np[mi].astype('uint8') * 255)
+                            # encontra contornos
+                            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            if not contours:
+                                continue
+                            largest = max(contours, key=cv2.contourArea)
+                            if cv2.contourArea(largest) < 10:
+                                continue
+                            rect = cv2.minAreaRect(largest)
+                            ((cx, cy), (bw, bh), angle) = rect
+                            # converter para porcentagens relativas
                             x_pct = float(((cx - bw/2) / w) * 100.0)
                             y_pct = float(((cy - bh/2) / h) * 100.0)
                             width_pct = float((bw / w) * 100.0)
                             height_pct = float((bh / h) * 100.0)
-                        else:
-                            # Fallback se o formato xywhr for inesperado
-                            logger.debug('Formato xywhr inesperado: %s', xywhr)
-                            continue
-                    else:
-                        # Fallback para BB comum
-                        xyxy = det.xyxy.cpu().numpy().flatten().tolist()
-                        x1, y1, x2, y2 = xyxy
-                        x_pct = float((x1 / w) * 100.0)
-                        y_pct = float((y1 / h) * 100.0)
-                        width_pct = float(((x2 - x1) / w) * 100.0)
-                        height_pct = float(((y2 - y1) / h) * 100.0)
-                        rotation_deg = 0.0
+                            rotation_deg = float(angle)
+                            # sem score/label conhecido; usar heurística de area
+                            area_frac = (bw * bh) / (w * h)
+                            label = self._determine_class_by_area(area_frac)
+                            predictions_data.append({
+                                'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
+                                'rotation': rotation_deg, 'score': 0.5, 'label': label,
+                                'orig_w': w, 'orig_h': h
+                            })
+                        if predictions_data:
+                            logger.info('Fallback OBBs gerados a partir de máscaras: %d', len(predictions_data))
+                            # obter items a partir de predictions_data para geração posterior
+                            return {'items': predictions_data, 'width': w, 'height': h}
                 except Exception as e:
-                    logger.debug('Erro extraindo coords de det %d: %s', idx, e)
-                    continue
+                    logger.debug('Erro no fallback de máscaras->OBB: %s', e)
 
-                logger.debug('Det %d: name=%s mapped_label=%s conf=%.4f bbox=[x=%.2f y=%.2f w=%.2f h=%.2f rot=%.2f]', idx, name, label, conf, x_pct, y_pct, width_pct, height_pct, rotation_deg)
+            logger.info("Nenhuma detecção encontrada na imagem.")
+            return {'items': [], 'width': w, 'height': h}
 
-                predictions_data.append({
-                    'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
-                    'rotation': rotation_deg, 'score': conf, 'label': label,
-                    'orig_w': w, 'orig_h': h
-                })
+        # debug: número de itens antes do parsing
+        try:
+            n_items = len(items)
+        except Exception:
+            try:
+                n_items = items.shape[0]
+            except Exception:
+                n_items = -1
+        logger.debug('Número bruto de detecções (items): %s', n_items)
+
+        for idx, det in enumerate(items):
+            # conf / cls leitura robusta
+            try:
+                conf = float(det.conf.item())
+            except Exception:
+                try:
+                    conf = float(getattr(det, 'conf', 0.0))
+                except Exception:
+                    conf = 0.0
+            try:
+                cls_idx = int(det.cls.item())
+            except Exception:
+                try:
+                    cls_idx = int(getattr(det, 'cls', 0))
+                except Exception:
+                    cls_idx = 0
+            name = res.names.get(cls_idx, str(cls_idx))
+            label = self._map_label_by_name(name) or self._determine_class_by_area(0)
+
+            # Extração para OBB (Oriented Bounding Box)
+            rotation_deg = 0.0
+            x_pct = y_pct = width_pct = height_pct = 0.0
+            try:
+                if hasattr(det, 'xywhr') and det.xywhr is not None:
+                    xywhr = det.xywhr.cpu().numpy().flatten().tolist()
+                    if len(xywhr) == 5:
+                        cx, cy, bw, bh, rotation_rad = xywhr
+                        rotation_deg = float(np.degrees(rotation_rad))
+                        x_pct = float(((cx - bw/2) / w) * 100.0)
+                        y_pct = float(((cy - bh/2) / h) * 100.0)
+                        width_pct = float((bw / w) * 100.0)
+                        height_pct = float((bh / h) * 100.0)
+                    else:
+                        # Fallback se o formato xywhr for inesperado
+                        logger.debug('Formato xywhr inesperado: %s', xywhr)
+                        continue
+                else:
+                    # Fallback para BB comum
+                    xyxy = det.xyxy.cpu().numpy().flatten().tolist()
+                    x1, y1, x2, y2 = xyxy
+                    x_pct = float((x1 / w) * 100.0)
+                    y_pct = float((y1 / h) * 100.0)
+                    width_pct = float(((x2 - x1) / w) * 100.0)
+                    height_pct = float(((y2 - y1) / h) * 100.0)
+                    rotation_deg = 0.0
+            except Exception as e:
+                logger.debug('Erro extraindo coords de det %d: %s', idx, e)
+                continue
+
+            logger.debug('Det %d: name=%s mapped_label=%s conf=%.4f bbox=[x=%.2f y=%.2f w=%.2f h=%.2f rot=%.2f]', idx, name, label, conf, x_pct, y_pct, width_pct, height_pct, rotation_deg)
+
+            predictions_data.append({
+                'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
+                'rotation': rotation_deg, 'score': conf, 'label': label,
+                'orig_w': w, 'orig_h': h
+            })
 
             logger.debug('Predictions_data length after parsing items: %d', len(predictions_data))
             # schedule async debug dump to avoid blocking main flow (controlled by DEBUG_DUMP env)
+            # attempt to also run vehicle detector and merge its boxes into predictions_data
+            res_for_dump = res
+            vres = None
+            try:
+                try:
+                    v_yolo = self._load_vehicle_yolo()
+                except Exception:
+                    v_yolo = None
+                if v_yolo is not None:
+                    try:
+                        vconf = float(os.getenv('YOLO_VEH_CONF', conf))
+                        viu = float(os.getenv('YOLO_VEH_IOU', iou))
+                        vmax = int(os.getenv('YOLO_VEH_MAX_DET', max_det))
+                        try:
+                            vres = v_yolo(img, verbose=False, conf=vconf, iou=viu, max_det=vmax)
+                        except TypeError:
+                            vres = v_yolo(img, verbose=False)
+                        if isinstance(vres, (list, tuple)):
+                            vres = vres[0]
+                        # parse vehicle boxes and append to predictions_data (as BBs)
+                        if hasattr(vres, 'boxes') and vres.boxes is not None:
+                            try:
+                                v_xyxy = getattr(vres.boxes, 'xyxy', None)
+                                v_conf = getattr(vres.boxes, 'conf', None)
+                                v_cls = getattr(vres.boxes, 'cls', None)
+                                if v_xyxy is not None:
+                                    v_xy = v_xyxy.cpu().numpy()
+                                    v_conf_arr = v_conf.cpu().numpy() if v_conf is not None else [0] * len(v_xy)
+                                    v_cls_arr = v_cls.cpu().numpy() if v_cls is not None else [0] * len(v_xy)
+                                    for b, sc, cls_idx in zip(v_xy, v_conf_arr, v_cls_arr):
+                                        bx1, by1, bx2, by2 = b.tolist()
+                                        x_pct = float((bx1 / w) * 100.0)
+                                        y_pct = float((by1 / h) * 100.0)
+                                        width_pct = float(((bx2 - bx1) / w) * 100.0)
+                                        height_pct = float(((by2 - by1) / h) * 100.0)
+                                        name = vres.names.get(int(cls_idx), str(int(cls_idx))) if hasattr(vres, 'names') else str(int(cls_idx))
+                                        label = self._map_label_by_name(name) or self._determine_class_by_area(((bx2 - bx1) * (by2 - by1)) / (w * h) if w * h > 0 else 0)
+                                        predictions_data.append({'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': 0.0, 'score': float(sc), 'label': label, 'orig_w': w, 'orig_h': h})
+                            except Exception as e:
+                                logger.debug('Vehicle detector parsing failed: %s', e)
+                    except Exception as e:
+                        logger.debug('Vehicle detector inference failed: %s', e)
+                if vres is not None:
+                    res_for_dump = {'plate': res, 'vehicle': vres}
+            except Exception as e:
+                logger.debug('Erro ao tentar detectar veículos: %s', e)
+
             try:
                 if os.getenv('DEBUG_DUMP', '0') == '1':
-                    t = threading.Thread(target=self._async_debug_dump, args=(image_url, img, res, predictions_data), daemon=True)
+                    t = threading.Thread(target=self._async_debug_dump, args=(image_url, img, res_for_dump, predictions_data), daemon=True)
                     t.start()
             except Exception as e:
                 logger.debug('Erro iniciando debug thread: %s', e)
@@ -444,10 +532,7 @@ class NewModel(LabelStudioMLBase):
                             predictions_data = new_preds
             except Exception as e:
                 logger.debug('Erro durante tiling fallback: %s', e)
-        except Exception as e:
-            logger.error('Erro ao interpretar resultados YOLO: %s', e)
-            raise
-        
+            
         if has_obb and len(res.obb) > 0:
             logger.info(f"Detectadas {len(res.obb)} caixas OBB")
             items = res.obb
@@ -583,43 +668,83 @@ class NewModel(LabelStudioMLBase):
             debug_base = f"{base_name}_{uid}"
 
             dump = {'predictions_data': predictions_data}
-
-            # Safely try to read raw attributes
+            # allow raw introspection of either a single response or a dict of responses
             try:
-                if hasattr(res, 'boxes') and getattr(res, 'boxes') is not None:
+                dump['raw'] = {}
+                if isinstance(res, dict):
+                    for k, rv in res.items():
+                        entry = {}
+                        try:
+                            if hasattr(rv, 'boxes') and getattr(rv, 'boxes') is not None:
+                                try:
+                                    bx = getattr(rv.boxes, 'xyxy', None)
+                                    if bx is not None:
+                                        entry['boxes_xyxy'] = bx.cpu().numpy().tolist()
+                                except Exception:
+                                    entry['boxes_repr'] = str(rv.boxes)
+                                try:
+                                    conf = getattr(rv.boxes, 'conf', None)
+                                    if conf is not None:
+                                        entry['boxes_conf'] = conf.cpu().numpy().tolist()
+                                except Exception:
+                                    pass
+                                try:
+                                    cls = getattr(rv.boxes, 'cls', None)
+                                    if cls is not None:
+                                        entry['boxes_cls'] = cls.cpu().numpy().tolist()
+                                except Exception:
+                                    pass
+                            if hasattr(rv, 'obb') and getattr(rv, 'obb') is not None:
+                                try:
+                                    entry['obb'] = []
+                                    for o in rv.obb:
+                                        try:
+                                            entry['obb'].append(o.cpu().numpy().tolist())
+                                        except Exception:
+                                            entry['obb'].append(str(o))
+                                except Exception:
+                                    entry['obb_repr'] = str(rv.obb)
+                            if hasattr(rv, 'masks') and getattr(rv, 'masks') is not None:
+                                try:
+                                    m = getattr(rv.masks, 'data', None)
+                                    if m is not None:
+                                        entry['masks_shape'] = m.cpu().numpy().shape
+                                except Exception:
+                                    entry['masks_error'] = 'failed to read masks'
+                        except Exception:
+                            entry['introspect_error'] = True
+                        dump['raw'][k] = entry
+                else:
+                    # single response object
                     try:
-                        bx = getattr(res.boxes, 'xyxy', None)
-                        if bx is not None:
-                            dump['raw_boxes_xyxy'] = bx.cpu().numpy().tolist()
-                        conf = getattr(res.boxes, 'conf', None)
-                        if conf is not None:
-                            dump['raw_boxes_conf'] = conf.cpu().numpy().tolist()
-                        cls = getattr(res.boxes, 'cls', None)
-                        if cls is not None:
-                            dump['raw_boxes_cls'] = cls.cpu().numpy().tolist()
-                    except Exception:
-                        dump['raw_boxes_repr'] = str(res.boxes)
-                if hasattr(res, 'obb') and getattr(res, 'obb') is not None:
-                    try:
-                        dump['raw_obb'] = []
-                        for o in res.obb:
+                        if hasattr(res, 'boxes') and getattr(res, 'boxes') is not None:
                             try:
-                                dump['raw_obb'].append(o.cpu().numpy().tolist())
+                                bx = getattr(res.boxes, 'xyxy', None)
+                                if bx is not None:
+                                    dump['raw_boxes_xyxy'] = bx.cpu().numpy().tolist()
                             except Exception:
-                                dump['raw_obb'].append(str(o))
+                                dump['raw_boxes_repr'] = str(res.boxes)
+                        if hasattr(res, 'obb') and getattr(res, 'obb') is not None:
+                            try:
+                                dump['raw_obb'] = []
+                                for o in res.obb:
+                                    try:
+                                        dump['raw_obb'].append(o.cpu().numpy().tolist())
+                                    except Exception:
+                                        dump['raw_obb'].append(str(o))
+                            except Exception:
+                                dump['raw_obb_repr'] = str(res.obb)
+                        if hasattr(res, 'masks') and getattr(res, 'masks') is not None:
+                            try:
+                                m = getattr(res.masks, 'data', None)
+                                if m is not None:
+                                    dump['masks_shape'] = m.cpu().numpy().shape
+                            except Exception:
+                                dump['masks_error'] = 'failed to read masks'
                     except Exception:
-                        dump['raw_obb_repr'] = str(res.obb)
-                if hasattr(res, 'masks') and getattr(res, 'masks') is not None:
-                    try:
-                        m = getattr(res.masks, 'data', None)
-                        if m is not None:
-                            dump['masks_shape'] = m.cpu().numpy().shape
-                        else:
-                            dump['masks_repr'] = str(res.masks)
-                    except Exception:
-                        dump['masks_error'] = 'failed to read masks'
+                        dump['raw_error'] = 'failed to introspect res'
             except Exception:
-                dump['raw_error'] = 'failed to introspect res'
+                dump['raw_error'] = 'failed to introspect res overall'
 
             # atomic json write
             json_path = os.path.join(run_dir, debug_base + '.json')
@@ -637,7 +762,9 @@ class NewModel(LabelStudioMLBase):
 
             # visualization (best-effort)
             try:
-                vis_path = os.path.join(run_dir, debug_base + '.png')
+                imgs_dir = os.path.join(run_dir, 'imgs')
+                os.makedirs(imgs_dir, exist_ok=True)
+                vis_path = os.path.join(imgs_dir, debug_base + '.png')
                 tmp_vis = vis_path + '.tmp.png'
                 vis_img = np.array(img).copy()
                 if cv2 is not None:
@@ -697,63 +824,35 @@ class NewModel(LabelStudioMLBase):
     def _generate_results(self, items):
         results = []
         total_score = 0.0
-        
+
         for it in items:
-            label = it['label']
-            total_score += it['score']
-            # `from_name` must match the RectangleLabels control name in your label config
-            control_name = 'label'  # your XML uses name="label" for RectangleLabels
-            res_item = {
-                'id': str(uuid4()),
-                'from_name': control_name,
-                'to_name': 'image',
-                'original_width': it['orig_w'],
-                'original_height': it['orig_h'],
-                'value': {
-                    'x': it['x'],
-                    'y': it['y'],
-                    'width': it['width'],
-                    'height': it['height'],
-                    'rotation': it['rotation'],
-                    'rectanglelabels': [label]
-                },
-                'score': it['score'],
-                'type': 'rectanglelabels',
-                'readonly': False
-            }
-            results.append(res_item)
-            
-        avg = total_score / max(len(results), 1) if results else 0
-        return [{'result': results, 'model_version': 'yolov11-obb', 'score': avg}]
-        results = []
-        total_score = 0.0
-        
-        for it in items:
-            label = it['label']
-            total_score += it['score']
-            
-            # CORREÇÃO CRUCIAL: 'from_name' deve ser o nome do Label no XML (car, bus, etc)
-            # Como seu XML tem um RectangleLabels para cada classe, o from_name deve ser a própria classe.
-            results.append({
-                'id': str(uuid4()),
-                'from_name': label, # Antes era 'label', agora bate com o XML
-                'to_name': 'image',
-                'original_width': it['orig_w'],
-                'original_height': it['orig_h'],
-                'value': {
-                    'x': it['x'],
-                    'y': it['y'],
-                    'width': it['width'],
-                    'height': it['height'],
-                    'rotation': it['rotation'],
-                    'rectanglelabels': [label]
-                },
-                'score': it['score'],
-                'type': 'rectanglelabels',
-                'readonly': False
-            })
-            
-        avg = total_score / max(len(results), 1) if results else 0
+            try:
+                score = float(it.get('score', 0.0))
+                label = it.get('label', '')
+                res_item = {
+                    'id': str(uuid4()),
+                    'from_name': 'label',
+                    'to_name': 'image',
+                    'original_width': it.get('orig_w', 0),
+                    'original_height': it.get('orig_h', 0),
+                    'value': {
+                        'x': it.get('x', 0),
+                        'y': it.get('y', 0),
+                        'width': it.get('width', 0),
+                        'height': it.get('height', 0),
+                        'rotation': it.get('rotation', 0),
+                        'rectanglelabels': [label]
+                    },
+                    'score': score,
+                    'type': 'rectanglelabels',
+                    'readonly': False
+                }
+                results.append(res_item)
+                total_score += score
+            except Exception:
+                continue
+
+        avg = total_score / len(results) if results else 0
         return [{'result': results, 'model_version': 'yolov11-obb', 'score': avg}]
     def _submit_predictions(self, task_id, predictions, project_id):
         if not self.client:

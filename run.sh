@@ -13,7 +13,7 @@ load_env() {
 
 # Função para limpar memória (variáveis da sessão)
 reset_memory() {
-    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_MODEL_PATH SELECTED_BACKEND
+    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND
 }
 
 init_config() {
@@ -52,7 +52,6 @@ start_servers() {
         return 1
     fi
 
-    # Exporta para garantir que o subshell do terminal veja as configs atuais
     export BASE_DIR DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN
 
     gnome-terminal -- bash -c "
@@ -91,7 +90,13 @@ auto_label() {
         read -p "[CONFIGURACAO] Informe o PERSONAL_TOKEN do Label Studio: " IN_PT
         [ ! -z "$IN_PT" ] && PERSONAL_TOKEN=$IN_PT && echo "PERSONAL_TOKEN=$PERSONAL_TOKEN" >> "$ENV_FILE"
     fi
-    # Pergunta/define se debug deve estar ativo (grava em .env)
+
+    if [ -z "$LEGACY_TOKEN" ]; then
+        read -p "[CONFIGURACAO] Informe o LEGACY_TOKEN do Label Studio: " IN_LT
+        [ ! -z "$IN_LT" ] && LEGACY_TOKEN=$IN_LT && echo "LEGACY_TOKEN=$LEGACY_TOKEN" >> "$ENV_FILE"
+    fi
+
+    # Debug Dump config
     if [ -z "$DEBUG_DUMP" ]; then
         read -p "[CONFIGURACAO] Habilitar debug dumps (json/png)? (S/n): " IN_DEBUG
         if [ "$IN_DEBUG" = "n" ] || [ "$IN_DEBUG" = "N" ]; then
@@ -103,12 +108,7 @@ auto_label() {
     fi
     export DEBUG_DUMP
 
-    if [ -z "$LEGACY_TOKEN" ]; then
-        read -p "[CONFIGURACAO] Informe o LEGACY_TOKEN do Label Studio: " IN_LT
-        [ ! -z "$IN_LT" ] && LEGACY_TOKEN=$IN_LT && echo "LEGACY_TOKEN=$LEGACY_TOKEN" >> "$ENV_FILE"
-    fi
-
-    # Seleção de Backend (Persistente)
+    # Seleção de Backend
     if [ -z "$SELECTED_BACKEND" ]; then
         echo
         read -p "[CONFIGURACAO] Escolha backend: 1) SAM2  2) YOLOv11 (Enter = 1): " IN_BACK
@@ -120,29 +120,43 @@ auto_label() {
         echo "SELECTED_BACKEND=$SELECTED_BACKEND" >> "$ENV_FILE"
     fi
 
-    # Exportações para o Python
     export LABEL_STUDIO_API_KEY=$PERSONAL_TOKEN
     export DEVICE=$DEVICE
     export LABEL_STUDIO_URL=$LABEL_STUDIO_URL
 
     if [ "$SELECTED_BACKEND" = "YOLO" ]; then
-        # Fluxo YOLO
-        if [ -z "$YOLO_MODEL_PATH" ]; then
-            read -p "[CONFIGURACAO] Caminho YOLO Model (Enter para padrao): " IN_YMP
-            YOLO_MODEL_PATH=${IN_YMP:-"label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/models/best.pt"}
-            echo "YOLO_MODEL_PATH=$YOLO_MODEL_PATH" >> "$ENV_FILE"
+        # --- CONFIGURAÇÃO YOLO PLATE ---
+        if [ -z "$YOLO_PLATE_MODEL_PATH" ]; then
+            read -p "[CONFIGURACAO] Caminho YOLO Plate Model (Enter para padrao): " IN_YMP
+            YOLO_PLATE_MODEL_PATH=${IN_YMP:-"label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/models/best.pt"}
+            echo "YOLO_PLATE_MODEL_PATH=$YOLO_PLATE_MODEL_PATH" >> "$ENV_FILE"
         fi
 
-        if [ ! -f "$YOLO_MODEL_PATH" ]; then
-            echo "YOLO model não encontrado. Tentando baixar..."
-            source ./labelStudioVenv/bin/activate
-            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/download_yolo_model.py
+        # --- CONFIGURAÇÃO YOLO VEHICLE ---
+        if [ -z "$YOLO_VEHICLE_MODEL_PATH" ]; then
+            read -p "[CONFIGURACAO] Caminho YOLO Vehicle Model (Enter para padrao): " IN_YVP
+            YOLO_VEHICLE_MODEL_PATH=${IN_YVP:-"label-studio-ml-backend/label_studio_ml/examples/yolov11/models/yolo11x.pt"}
+            echo "YOLO_VEHICLE_MODEL_PATH=$YOLO_VEHICLE_MODEL_PATH" >> "$ENV_FILE"
+        fi
+
+        # Verificações de modelos (sem download automático)
+        if [ -f "$YOLO_PLATE_MODEL_PATH" ]; then
+            echo "[SUCESSO] Plate detector encontrado em: $YOLO_PLATE_MODEL_PATH"
+        else
+            echo "[AVISO] Plate detector não encontrado em: $YOLO_PLATE_MODEL_PATH"
+            echo "[AVISO] O backend verificará os modelos em tempo de execução."
+        fi
+
+        if [ -f "$YOLO_VEHICLE_MODEL_PATH" ]; then
+            echo "[SUCESSO] Vehicle detector encontrado em: $YOLO_VEHICLE_MODEL_PATH"
+        else
+            echo "[AVISO] Vehicle detector não encontrado em: $YOLO_VEHICLE_MODEL_PATH"
         fi
 
         echo "Iniciando Auto-labeling CLI (YOLOv11)..."
         source ./labelStudioVenv/bin/activate
         pushd ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate > /dev/null
-        python3 auto_label_cli.py --model_path="$YOLO_MODEL_PATH"
+        python3 auto_label_cli.py --model_path="$YOLO_PLATE_MODEL_PATH" --vehicle_model_path="$YOLO_VEHICLE_MODEL_PATH"
         popd > /dev/null
     else
         # Fluxo SAM2
@@ -172,7 +186,6 @@ stop_servers() {
     echo "Parando servidores..."
     pkill -f "label-studio"
     pkill -f "label-studio-ml"
-    # Se usar tmux, encerra a sessão também
     tmux kill-session -t labelstudio 2>/dev/null
     echo "Processos encerrados."
     sleep 2
@@ -182,7 +195,6 @@ reset_env() {
     echo "Apagando configuracoes e limpando memoria..."
     [ -f "$ENV_FILE" ] && rm "$ENV_FILE"
     reset_memory
-    init_config
 }
 
 # Loop do Menu Principal

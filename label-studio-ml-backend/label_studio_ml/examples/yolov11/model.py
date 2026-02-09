@@ -1,13 +1,26 @@
 """
-Deprecated module stub.
+Backward-compatible YOLOv11 backend for vehicle detection (yolo11x).
 
-The `label_studio_ml/examples/yolov11` example was renamed to
-`label_studio_ml/examples/yolov11-plate`. This file is kept as a stub
-to avoid accidental imports from the old path. Please use the
-`yolov11-plate` example instead.
+This module provides a `NewModel` that uses a yolo11x checkpoint by
+default (examples/yolov11/models/yolo11x.pt) and maps detections to
+classes defined in `sam2_classes.json` (vehicles, trucks, buses, etc.).
 """
 
-raise ImportError("Deprecated: use label_studio_ml/examples/yolov11-plate/model.py instead")
+def load_classes_config():
+    candidates = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'sam2_classes.json')),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sam2_classes.json')),
+        os.path.join(os.path.dirname(__file__), 'sam2_classes.json'),
+        os.path.abspath(os.path.join(os.getcwd(), 'sam2_classes.json')),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r', encoding='utf8') as f:
+                    return json.load(f)
+            except Exception:
+                continue
+    return {"classes": []}
 
 
 def load_image_from_url(url):
@@ -47,12 +60,13 @@ class NewModel(LabelStudioMLBase):
         self.client = Client(url=os.getenv('LABEL_STUDIO_URL'), api_key=os.getenv('LEGACY_TOKEN') or os.getenv('PERSONAL_TOKEN')) if (os.getenv('LABEL_STUDIO_URL') and (os.getenv('LEGACY_TOKEN') or os.getenv('PERSONAL_TOKEN'))) else None
         self.classes_config = load_classes_config()
         self._yolo = None
-        # Resolve YOLO model path: prefer absolute/expanded env var, else package-local models/best.pt
+        # Resolve YOLO model path: prefer explicit env var, else use yolo11/models/yolo11x.pt
         env_path = os.getenv('YOLO_MODEL_PATH')
         candidates = []
         if env_path:
             candidates.append(os.path.abspath(os.path.expanduser(env_path)))
-        candidates.append(os.path.join(os.path.dirname(__file__), 'models', os.path.basename(env_path or 'best.pt')))
+        # default for vehicle detector (yolo11x)
+        candidates.append(os.path.join(os.path.dirname(__file__), 'models', os.path.basename(env_path or 'yolo11x.pt')))
         # pick first existing candidate, else default to package-local absolute path
         found = None
         for p in candidates:
@@ -336,38 +350,38 @@ class NewModel(LabelStudioMLBase):
                         height_pct = float(((y2 - y1) / h) * 100.0)
                         rotation_deg = 0.0
                     
-                            # Tentativa de derivar OBB a partir do patch da caixa (Canny -> minAreaRect)
-                            try:
-                                if cv2 is not None:
-                                    # crop patch in pixel coords
-                                    x1_px = max(0, int(round(x1)))
-                                    y1_px = max(0, int(round(y1)))
-                                    x2_px = min(w, int(round(x2)))
-                                    y2_px = min(h, int(round(y2)))
-                                    if x2_px > x1_px and y2_px > y1_px:
-                                        arr = np.array(img)
-                                        patch = arr[y1_px:y2_px, x1_px:x2_px]
-                                        if patch.size != 0:
-                                            gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
-                                            blur = cv2.GaussianBlur(gray, (5,5), 0)
-                                            edges = cv2.Canny(blur, 50, 150)
-                                            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                            if contours:
-                                                largest = max(contours, key=cv2.contourArea)
-                                                if cv2.contourArea(largest) > 10:
-                                                    rect = cv2.minAreaRect(largest)
-                                                    ((cx_p, cy_p), (bw_px, bh_px), angle) = rect
-                                                    # convert to global coords
-                                                    cx = x1_px + cx_p
-                                                    cy = y1_px + cy_p
-                                                    rotation_deg = float(angle)
-                                                    width_pct = float((bw_px / w) * 100.0)
-                                                    height_pct = float((bh_px / h) * 100.0)
-                                                    x_pct = float(((cx - bw_px/2) / w) * 100.0)
-                                                    y_pct = float(((cy - bh_px/2) / h) * 100.0)
-                                                    logger.debug('OBB derivado do patch: angle=%.2f bw=%d bh=%d', rotation_deg, int(bw_px), int(bh_px))
-                            except Exception as e:
-                                logger.debug('Erro derivando OBB do patch: %s', e)
+                        # Tentativa de derivar OBB a partir do patch da caixa (Canny -> minAreaRect)
+                        try:
+                            if cv2 is not None:
+                                # crop patch in pixel coords
+                                x1_px = max(0, int(round(x1)))
+                                y1_px = max(0, int(round(y1)))
+                                x2_px = min(w, int(round(x2)))
+                                y2_px = min(h, int(round(y2)))
+                                if x2_px > x1_px and y2_px > y1_px:
+                                    arr = np.array(img)
+                                    patch = arr[y1_px:y2_px, x1_px:x2_px]
+                                    if patch.size != 0:
+                                        gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
+                                        blur = cv2.GaussianBlur(gray, (5,5), 0)
+                                        edges = cv2.Canny(blur, 50, 150)
+                                        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                        if contours:
+                                            largest = max(contours, key=cv2.contourArea)
+                                            if cv2.contourArea(largest) > 10:
+                                                rect = cv2.minAreaRect(largest)
+                                                ((cx_p, cy_p), (bw_px, bh_px), angle) = rect
+                                                # convert to global coords
+                                                cx = x1_px + cx_p
+                                                cy = y1_px + cy_p
+                                                rotation_deg = float(angle)
+                                                width_pct = float((bw_px / w) * 100.0)
+                                                height_pct = float((bh_px / h) * 100.0)
+                                                x_pct = float(((cx - bw_px/2) / w) * 100.0)
+                                                y_pct = float(((cy - bh_px/2) / h) * 100.0)
+                                                logger.debug('OBB derivado do patch: angle=%.2f bw=%d bh=%d', rotation_deg, int(bw_px), int(bh_px))
+                        except Exception as e:
+                            logger.debug('Erro derivando OBB do patch: %s', e)
                 except Exception as e:
                     logger.debug('Erro extraindo coords de det %d: %s', idx, e)
                     continue

@@ -1,0 +1,347 @@
+{
+  "task_id": 1,
+  "result": [
+    {
+      "id": "1e10695a-f343-45fe-80cc-12cab0397cc1",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 59.127216339111335,
+        "y": 75.57326564330697,
+        "width": 3.658618927001953,
+        "height": 1.850434332893966,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car_plate"
+        ]
+      },
+      "score": 0.29379892349243164,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "e734080d-fe67-42e3-ac91-5c06a5467f62",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 1.796102523803711,
+        "y": 62.55526416959578,
+        "width": 41.49475574493408,
+        "height": 36.447778220196255,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.9470938444137573,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "ac7ea04d-3ff9-4b70-8b10-21fe42d50fd2",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 77.99343585968018,
+        "y": 67.8811554330514,
+        "width": 20.11390209197998,
+        "height": 24.80739063873023,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.926157534122467,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "13679570-fb5f-42e3-931f-1afb22f9591b",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 68.66800785064697,
+        "y": 53.912410724910295,
+        "width": 9.674711227416992,
+        "height": 15.688877742613135,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "bus"
+        ]
+      },
+      "score": 0.9030778408050537,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "8132682d-e261-401e-866a-22ec3ef4789c",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 54.47395324707032,
+        "y": 65.02643355027095,
+        "width": 12.98151969909668,
+        "height": 17.077801195445225,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.8936077952384949,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "83a2a8df-4e23-4bb9-b289-c2aabf03dc59",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 76.0813045501709,
+        "y": 65.13534572715291,
+        "width": 13.672943115234377,
+        "height": 16.693068751830697,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.8802207112312317,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "dd004a5b-8e6a-41d7-8ed3-746ead3d13a0",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 71.0483169555664,
+        "y": 62.32378825012815,
+        "width": 7.98111915588379,
+        "height": 10.384286211189222,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.8687618374824524,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "f5b0a4d7-4d0f-41f5-8a0b-d73e2554b7b3",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 39.35877323150635,
+        "y": 63.28152174410515,
+        "width": 11.808938980102539,
+        "height": 16.135507057337435,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.8554643988609314,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "7827acab-65e0-4a34-9da9-6632fb1da051",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 35.94107627868652,
+        "y": 66.05281103544229,
+        "width": 8.64786148071289,
+        "height": 21.693789588825425,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.8200716972351074,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "b9698760-bf80-4df8-b16f-2c81309ade57",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 49.439029693603516,
+        "y": 63.591410140231396,
+        "width": 6.678447723388673,
+        "height": 9.044373237954014,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.7967839241027832,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "8bf5eb3e-da47-47ad-8429-98d3aa51c8f1",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 0.038301944732666016,
+        "y": 35.059087180085676,
+        "width": 14.84694242477417,
+        "height": 58.230070573374334,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "truck"
+        ]
+      },
+      "score": 0.6193379163742065,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "fbf3fdb3-27af-4032-bb63-d7d44373b74a",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 64.79062557220459,
+        "y": 56.131991546756,
+        "width": 2.4755001068115234,
+        "height": 7.939104148359695,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "bus"
+        ]
+      },
+      "score": 0.5435908436775208,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "6c137993-7bd7-4782-843b-121a5f7ab977",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 66.6270923614502,
+        "y": 55.3442911998389,
+        "width": 3.153362274169922,
+        "height": 11.478499606400117,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "bus"
+        ]
+      },
+      "score": 0.4823532998561859,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "d1990dba-457a-4a1d-ae44-946e25a2ab5a",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 59.497737884521484,
+        "y": 62.34301772114821,
+        "width": 8.4149169921875,
+        "height": 10.144851049904803,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.3331604599952698,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "78e204ad-7866-431e-a9d0-f80937d53d5d",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 56.96907043457031,
+        "y": 60.897925476896596,
+        "width": 2.9560089111328125,
+        "height": 4.224276416959579,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.3222363591194153,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "081123d8-569a-4523-a4a9-991984d3bf4e",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 48.84963512420654,
+        "y": 62.44789664341681,
+        "width": 3.8826370239257812,
+        "height": 3.084896291007616,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.2987971901893616,
+      "type": "rectanglelabels",
+      "readonly": false
+    },
+    {
+      "id": "26e70320-dc06-4e37-8ae0-1b87aad67093",
+      "from_name": "label",
+      "to_name": "image",
+      "original_width": 2560,
+      "original_height": 1707,
+      "value": {
+        "x": 52.96519279479981,
+        "y": 61.58249178474663,
+        "width": 4.213294982910156,
+        "height": 4.825731935596075,
+        "rotation": 0.0,
+        "rectanglelabels": [
+          "car"
+        ]
+      },
+      "score": 0.27607184648513794,
+      "type": "rectanglelabels",
+      "readonly": false
+    }
+  ],
+  "model_version": "yolov11-bb",
+  "score": 0.6506227307459888
+}

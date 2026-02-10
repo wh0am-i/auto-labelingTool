@@ -25,32 +25,6 @@ def check_label_studio_connection(url, max_retries=5):
     logger.error(f"✗ Não foi possível conectar ao Label Studio em {url}")
     return False
 
-
-def check_yolo_model():
-    # Prefer an absolute/expanded env path, but also check the package-local models folder
-    env_path = os.getenv('YOLO_MODEL_PATH')
-    candidates = []
-    if env_path:
-        # expand and absolutize the env var (it may be relative to project root)
-        candidates.append(os.path.abspath(os.path.expanduser(env_path)))
-    # canonical location inside this examples/yolov11 package
-    candidates.append(os.path.join(os.path.dirname(__file__), 'models', os.path.basename(env_path or 'best.pt')))
-
-    for p in candidates:
-        if os.path.exists(p):
-            logger.info(f"✓ Checkpoint encontrado: {os.path.abspath(p)}")
-            return True
-
-    # Not found — show helpful paths
-    logger.error(f"✗ YOLO model não encontrado. Procurado em:")
-    for p in candidates:
-        logger.info(" - %s", p)
-    logger.info("Para baixar o modelo automaticamente, execute:")
-    logger.info("   python download_yolo_model.py")
-    logger.info("Ou coloque o arquivo .pt em: %s", os.path.abspath(os.path.join(os.path.dirname(__file__), 'models')))
-    return False
-
-
 def main():
     label_studio_url = os.getenv('LABEL_STUDIO_URL')
     if not label_studio_url:
@@ -65,10 +39,6 @@ def main():
     logger.info(f"Verificando conexão com Label Studio em {label_studio_url}...")
     if not check_label_studio_connection(label_studio_url):
         logger.error("Impossível conectar ao Label Studio. Verifique se está rodando.")
-        sys.exit(1)
-
-    logger.info("Verificando modelo YOLOv11...")
-    if not check_yolo_model():
         sys.exit(1)
 
     try:

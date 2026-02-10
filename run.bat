@@ -100,7 +100,7 @@ goto flow_sam2
 :flow_yolo
 :: --- CONFIGURAÇÃO YOLO PLATE ---
 if "!YOLO_PLATE_MODEL_PATH!"=="" (
-    set /p "IN_YMP=[CONFIGURACAO] Caminho YOLO Plate Model (Enter para padrao): "
+    set /p "IN_YMP=[CONFIGURACAO] Caminho YOLOv11 Plate Model (Enter para padrao): "
     if "!IN_YMP!"=="" (
         set "YOLO_PLATE_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\models\best.pt"
     ) else (
@@ -111,7 +111,7 @@ if "!YOLO_PLATE_MODEL_PATH!"=="" (
 
 :: --- CONFIGURAÇÃO YOLO VEHICLE (YOLOv11x) ---
 if "!YOLO_VEHICLE_MODEL_PATH!"=="" (
-    set /p "IN_YVP=[CONFIGURACAO] Caminho YOLO Vehicle Model (Enter para padrao): "
+    set /p "IN_YVP=[CONFIGURACAO] Caminho YOLOv11 Vehicle Model (Enter para padrao): "
     if "!IN_YVP!"=="" (
         set "YOLO_VEHICLE_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11\models\yolo11x.pt"
     ) else (
@@ -122,16 +122,19 @@ if "!YOLO_VEHICLE_MODEL_PATH!"=="" (
 
 :: Verificação de arquivos (sem tentativa de download automatica)
 if exist "!YOLO_PLATE_MODEL_PATH!" (
-    echo [SUCESSO] Plate detector encontrado em: !YOLO_PLATE_MODEL_PATH!
+    echo [SUCESSO] YOLO Plate detector encontrado em: !YOLO_PLATE_MODEL_PATH!
 ) else (
-    echo [AVISO] Plate detector nao encontrado em: !YOLO_PLATE_MODEL_PATH!
-    echo [AVISO] O backend verificará os modelos em tempo de execução.
+    echo [AVISO] YOLO Plate detector nao encontrado em: !YOLO_PLATE_MODEL_PATH!
+    echo [AVISO] Tentando download...
+    python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_model.py
 )
 
 if exist "!YOLO_VEHICLE_MODEL_PATH!" (
-    echo [SUCESSO] Vehicle detector encontrado em: !YOLO_VEHICLE_MODEL_PATH!
+    echo [SUCESSO] YOLO Vehicle detector encontrado em: !YOLO_VEHICLE_MODEL_PATH!
 ) else (
-    echo [AVISO] Vehicle detector nao encontrado em: !YOLO_VEHICLE_MODEL_PATH!
+    echo [AVISO] YOLO Vehicle detector nao encontrado em: !YOLO_VEHICLE_MODEL_PATH!
+    echo [AVISO] Tentando download...
+    python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_model.py
 )
 
 :start_yolo_logic

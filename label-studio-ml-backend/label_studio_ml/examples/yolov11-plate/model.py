@@ -215,21 +215,24 @@ class NewModel(LabelStudioMLBase):
 
     def _map_label_by_name(self, detected_name):
         detected_name = (detected_name or '').lower().strip()
-        classes = self.classes_config.get('classes', [])
         
-        # 1. Tentativa de match exato com o ID ou Label
-        for cls in classes:
-            if detected_name == cls.get('id').lower() or detected_name == cls.get('label').lower():
-                return cls.get('label')
-            
-        for cls in classes:
-            for kw in cls.get('keywords', []):
-                # Se o nome detectado for EXATAMENTE a keyword
-                if kw.lower() == detected_name:
-                    return cls.get('label')
-                    
-        return None
+        # 1. Hardcoded mapping para garantir que placas nunca falhem
+        plate_synonyms = ['placa', 'license', 'plate', 'car_plate', 'motorcycle_plate', '0']
+        if any(syn in detected_name for syn in plate_synonyms):
+            # Se você tiver labels diferentes para placa de moto e carro, 
+            # pode refinar aqui, mas 'car_plate' é o padrão do seu XML
+            return 'car_plate'
 
+        # 2. Tentativa via config JSON (para veículos: car, truck, bus...)
+        classes = self.classes_config.get('classes', [])
+        for cls in classes:
+            if detected_name == cls.get('id', '').lower() or detected_name == cls.get('label', '').lower():
+                return cls.get('label')
+            for kw in cls.get('keywords', []):
+                if kw.lower() in detected_name: # 'in' é mais seguro que '=='
+                    return cls.get('label')    
+        return None
+    
     def _determine_class_by_area(self, area_fraction):
         classes = self.classes_config.get('classes', [])
         if not classes:
@@ -246,299 +249,102 @@ class NewModel(LabelStudioMLBase):
         fallback = min(classes, key=lambda x: x.get('min_area_ratio', 0))
         return fallback.get('label', fallback.get('id', 'object'))
 
+    def _extract_coords(self, det, w, h):
+        """Extrai coordenadas e converte para o formato 0-100 do Label Studio."""
+        try:
+            if hasattr(det, 'xywhr') and det.xywhr is not None: # Caso OBB
+                cx, cy, bw, bh, rot_rad = det.xywhr.cpu().numpy().flatten().tolist()
+                return {
+                    'x': float(((cx - bw/2) / w) * 100.0),
+                    'y': float(((cy - bh/2) / h) * 100.0),
+                    'width': float((bw / w) * 100.0),
+                    'height': float((bh / h) * 100.0),
+                    'rotation': float(np.degrees(rot_rad))
+                }
+            elif hasattr(det, 'xyxy'): # Caso Box normal
+                x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
+                return {
+                    'x': float((x1 / w) * 100.0),
+                    'y': float((y1 / h) * 100.0),
+                    'width': float(((x2 - x1) / w) * 100.0),
+                    'height': float(((y2 - y1) / h) * 100.0),
+                    'rotation': 0.0
+                }
+        except:
+            return None
+
     def _predict_image(self, image_url):
         img = load_image_from_url(image_url)
         w, h = img.size
-        yolo = self._load_yolo()
-        # configurable thresholds (env vars) - defaults more permissive to detect small/multiple objects
-        conf = float(os.getenv('YOLO_CONF', 0.10))
-        iou = float(os.getenv('YOLO_IOU', 0.45))
-        max_det = int(os.getenv('YOLO_MAX_DET', 300))
-
-        # Chamada para YOLOv11 (OBB)
-        try:
-            res = yolo(img, verbose=False, conf=conf, iou=iou, max_det=max_det)
-        except TypeError:
-            # fallback if older ultralytics signature
-            res = yolo(img, verbose=False)
-        if isinstance(res, (list, tuple)):
-            res = res[0]
-
-        # Debug: quais atributos o resultado tem
-        try:
-            attrs = {k: getattr(res, k) is not None for k in ['boxes', 'obb', 'masks']}
-            logger.debug(f'Result attributes presence: {attrs}')
-        except Exception:
-            logger.debug('Não foi possível inspecionar atributos de result')
-
-        # container for parsed predictions (ensure defined before any branch)
         predictions_data = []
 
-        # Verifica se existem detecções OBB primeiro
-        has_obb = hasattr(res, 'obb') and res.obb is not None
-        # Verifica se existem detecções de Boxes comuns
-        has_boxes = hasattr(res, 'boxes') and res.boxes is not None
+        # --- MODELO 1: PLACAS (YOLO Principal) ---
+        yolo_plate = self._load_yolo()
+        conf_p = float(os.getenv('YOLO_CONF', 0.15))
+        # Rodamos o modelo de placa
+        res_p_list = yolo_plate(img, conf=conf_p, verbose=False)
+        
+        for res_p in res_p_list:
+            # Pegamos Boxes (BB) para evitar problemas com OBB
+            if hasattr(res_p, 'boxes') and res_p.boxes is not None:
+                for det in res_p.boxes:
+                    cls_idx = int(det.cls.item())
+                    label = self._map_label_by_name(res_p.names.get(cls_idx, "")) or "car_plate"
+                    
+                    # Extração BB padrão (xyxy)
+                    x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
+                    predictions_data.append({
+                        'x': (x1 / w) * 100.0, 'y': (y1 / h) * 100.0,
+                        'width': ((x2 - x1) / w) * 100.0, 'height': ((y2 - y1) / h) * 100.0,
+                        'rotation': 0.0, 'score': float(det.conf.item()),
+                        'label': label, 'orig_w': w, 'orig_h': h
+                    })
 
-        items = []
-        if has_obb and len(res.obb) > 0:
-            items = res.obb
-        elif has_boxes and len(res.boxes) > 0:
-            items = res.boxes
-        else:
-            # tentar fallback a partir de máscaras (quando o modelo entrega masks)
-            if hasattr(res, 'masks') and res.masks is not None and cv2 is not None:
-                try:
-                    # tentar extrair masks em formato numpy (N,H,W)
-                    masks_np = None
-                    try:
-                        masks_np = res.masks.data.cpu().numpy()
-                    except Exception:
-                        try:
-                            masks_np = np.array(res.masks)
-                        except Exception:
-                            masks_np = None
-
-                    if masks_np is not None and masks_np.ndim == 3:
-                        logger.info('Fallback: gerando OBBs a partir de máscaras (%d masks)', masks_np.shape[0])
-                        for mi in range(masks_np.shape[0]):
-                            mask = (masks_np[mi].astype('uint8') * 255)
-                            # encontra contornos
-                            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                            if not contours:
-                                continue
-                            largest = max(contours, key=cv2.contourArea)
-                            if cv2.contourArea(largest) < 10:
-                                continue
-                            rect = cv2.minAreaRect(largest)
-                            ((cx, cy), (bw, bh), angle) = rect
-                            # converter para porcentagens relativas
-                            x_pct = float(((cx - bw/2) / w) * 100.0)
-                            y_pct = float(((cy - bh/2) / h) * 100.0)
-                            width_pct = float((bw / w) * 100.0)
-                            height_pct = float((bh / h) * 100.0)
-                            rotation_deg = float(angle)
-                            # sem score/label conhecido; usar heurística de area
-                            area_frac = (bw * bh) / (w * h)
-                            label = self._determine_class_by_area(area_frac)
-                            predictions_data.append({
-                                'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
-                                'rotation': rotation_deg, 'score': 0.5, 'label': label,
-                                'orig_w': w, 'orig_h': h
-                            })
-                        if predictions_data:
-                            logger.info('Fallback OBBs gerados a partir de máscaras: %d', len(predictions_data))
-                            # obter items a partir de predictions_data para geração posterior
-                            return {'items': predictions_data, 'width': w, 'height': h}
-                except Exception as e:
-                    logger.debug('Erro no fallback de máscaras->OBB: %s', e)
-
-            logger.info("Nenhuma detecção encontrada na imagem.")
-            return {'items': [], 'width': w, 'height': h}
-
-        # debug: número de itens antes do parsing
+        # --- MODELO 2: VEÍCULOS (Com Tiling para longa distância) ---
         try:
-            n_items = len(items)
-        except Exception:
-            try:
-                n_items = items.shape[0]
-            except Exception:
-                n_items = -1
-        logger.debug('Número bruto de detecções (items): %s', n_items)
-
-        for idx, det in enumerate(items):
-            # conf / cls leitura robusta
-            try:
-                conf = float(det.conf.item())
-            except Exception:
-                try:
-                    conf = float(getattr(det, 'conf', 0.0))
-                except Exception:
-                    conf = 0.0
-            try:
-                cls_idx = int(det.cls.item())
-            except Exception:
-                try:
-                    cls_idx = int(getattr(det, 'cls', 0))
-                except Exception:
-                    cls_idx = 0
-            name = res.names.get(cls_idx, str(cls_idx))
-            label = self._map_label_by_name(name) or self._determine_class_by_area(0)
-
-            # Extração para OBB (Oriented Bounding Box)
-            rotation_deg = 0.0
-            x_pct = y_pct = width_pct = height_pct = 0.0
-            try:
-                if hasattr(det, 'xywhr') and det.xywhr is not None:
-                    xywhr = det.xywhr.cpu().numpy().flatten().tolist()
-                    if len(xywhr) == 5:
-                        cx, cy, bw, bh, rotation_rad = xywhr
-                        rotation_deg = float(np.degrees(rotation_rad))
-                        x_pct = float(((cx - bw/2) / w) * 100.0)
-                        y_pct = float(((cy - bh/2) / h) * 100.0)
-                        width_pct = float((bw / w) * 100.0)
-                        height_pct = float((bh / h) * 100.0)
-                    else:
-                        # Fallback se o formato xywhr for inesperado
-                        logger.debug('Formato xywhr inesperado: %s', xywhr)
-                        continue
-                else:
-                    # Fallback para BB comum
-                    xyxy = det.xyxy.cpu().numpy().flatten().tolist()
-                    x1, y1, x2, y2 = xyxy
-                    x_pct = float((x1 / w) * 100.0)
-                    y_pct = float((y1 / h) * 100.0)
-                    width_pct = float(((x2 - x1) / w) * 100.0)
-                    height_pct = float(((y2 - y1) / h) * 100.0)
-                    rotation_deg = 0.0
-            except Exception as e:
-                logger.debug('Erro extraindo coords de det %d: %s', idx, e)
-                continue
-
-            logger.debug('Det %d: name=%s mapped_label=%s conf=%.4f bbox=[x=%.2f y=%.2f w=%.2f h=%.2f rot=%.2f]', idx, name, label, conf, x_pct, y_pct, width_pct, height_pct, rotation_deg)
-
-            predictions_data.append({
-                'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
-                'rotation': rotation_deg, 'score': conf, 'label': label,
-                'orig_w': w, 'orig_h': h
-            })
-
-            logger.debug('Predictions_data length after parsing items: %d', len(predictions_data))
-            # schedule async debug dump to avoid blocking main flow (controlled by DEBUG_DUMP env)
-            # attempt to also run vehicle detector and merge its boxes into predictions_data
-            res_for_dump = res
-            vres = None
-            try:
-                try:
-                    v_yolo = self._load_vehicle_yolo()
-                except Exception:
-                    v_yolo = None
-                if v_yolo is not None:
-                    try:
-                        vconf = float(os.getenv('YOLO_VEH_CONF', conf))
-                        viu = float(os.getenv('YOLO_VEH_IOU', iou))
-                        vmax = int(os.getenv('YOLO_VEH_MAX_DET', max_det))
-                        try:
-                            vres = v_yolo(img, verbose=False, conf=vconf, iou=viu, max_det=vmax)
-                        except TypeError:
-                            vres = v_yolo(img, verbose=False)
-                        if isinstance(vres, (list, tuple)):
-                            vres = vres[0]
-                        # parse vehicle boxes and append to predictions_data (as BBs)
-                        if hasattr(vres, 'boxes') and vres.boxes is not None:
-                            try:
-                                v_xyxy = getattr(vres.boxes, 'xyxy', None)
-                                v_conf = getattr(vres.boxes, 'conf', None)
-                                v_cls = getattr(vres.boxes, 'cls', None)
-                                if v_xyxy is not None:
-                                    v_xy = v_xyxy.cpu().numpy()
-                                    v_conf_arr = v_conf.cpu().numpy() if v_conf is not None else [0] * len(v_xy)
-                                    v_cls_arr = v_cls.cpu().numpy() if v_cls is not None else [0] * len(v_xy)
-                                    for b, sc, cls_idx in zip(v_xy, v_conf_arr, v_cls_arr):
-                                        bx1, by1, bx2, by2 = b.tolist()
-                                        x_pct = float((bx1 / w) * 100.0)
-                                        y_pct = float((by1 / h) * 100.0)
-                                        width_pct = float(((bx2 - bx1) / w) * 100.0)
-                                        height_pct = float(((by2 - by1) / h) * 100.0)
-                                        name = vres.names.get(int(cls_idx), str(int(cls_idx))) if hasattr(vres, 'names') else str(int(cls_idx))
-                                        label = self._map_label_by_name(name) or self._determine_class_by_area(((bx2 - bx1) * (by2 - by1)) / (w * h) if w * h > 0 else 0)
-                                        predictions_data.append({'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': 0.0, 'score': float(sc), 'label': label, 'orig_w': w, 'orig_h': h})
-                            except Exception as e:
-                                logger.debug('Vehicle detector parsing failed: %s', e)
-                    except Exception as e:
-                        logger.debug('Vehicle detector inference failed: %s', e)
-                if vres is not None:
-                    res_for_dump = {'plate': res, 'vehicle': vres}
-            except Exception as e:
-                logger.debug('Erro ao tentar detectar veículos: %s', e)
-
-            try:
-                if os.getenv('DEBUG_DUMP', '0') == '1':
-                    t = threading.Thread(target=self._async_debug_dump, args=(image_url, img, res_for_dump, predictions_data), daemon=True)
-                    t.start()
-            except Exception as e:
-                logger.debug('Erro iniciando debug thread: %s', e)
-            # Tiling fallback: se poucas detecções, tentar detectar em tiles (útil para placas pequenas/distantes)
-            try:
-                do_tiling = (len(predictions_data) < 3 and w > 800)
-                if os.getenv('YOLO_FORCE_TILE', '0') == '1':
-                    do_tiling = True
-                if do_tiling:
-                    logger.info('Executando detecção por tiles (fallback)')
-                    tile_size = int(os.getenv('YOLO_TILE_SIZE', '800'))
-                    overlap = float(os.getenv('YOLO_TILE_OVERLAP', '0.25'))
-                    stride = int(tile_size * (1 - overlap))
-                    img_arr = np.array(img)
-                    all_boxes = []
-                    all_scores = []
-                    all_cls = []
-                    for y0 in range(0, max(1, h - 1), max(1, stride)):
-                        for x0 in range(0, max(1, w - 1), max(1, stride)):
-                            x1 = x0 + tile_size
-                            y1_ = y0 + tile_size
-                            x2 = min(w, x1)
-                            y2 = min(h, y1_)
-                            # crop tile as PIL Image
-                            tile = Image.fromarray(img_arr[y0:y2, x0:x2])
-                            try:
-                                tres = yolo(tile, verbose=False, conf=conf, iou=iou, max_det=max_det)
-                            except TypeError:
-                                tres = yolo(tile, verbose=False)
-                            if isinstance(tres, (list, tuple)):
-                                tres = tres[0]
-                            if hasattr(tres, 'boxes') and tres.boxes is not None:
-                                try:
-                                    tb = tres.boxes.xyxy.cpu().numpy()
-                                    tc = tres.boxes.cls.cpu().numpy()
-                                    ts = tres.boxes.conf.cpu().numpy()
-                                    for b, cls_idx, sc in zip(tb, tc, ts):
-                                        # map to global coords
-                                        bx1, by1, bx2, by2 = b.tolist()
-                                        gx1 = bx1 + x0
-                                        gy1 = by1 + y0
-                                        gx2 = bx2 + x0
-                                        gy2 = by2 + y0
-                                        all_boxes.append([gx1, gy1, gx2, gy2])
-                                        all_scores.append(float(sc))
-                                        all_cls.append(int(cls_idx))
-                                except Exception:
-                                    pass
-                    # apply NMS on aggregated boxes
-                    if all_boxes:
-                        keep_idx = self._nms_boxes(all_boxes, all_scores, iou_threshold=float(os.getenv('YOLO_TILE_NMS_IOU', '0.3')))
-                        new_preds = []
-                        img_arr_full = np.array(img)
-                        for i in keep_idx:
-                            bx1, by1, bx2, by2 = all_boxes[i]
-                            sc = all_scores[i]
-                            cls_idx = all_cls[i]
-                            name = tres.names.get(cls_idx, str(cls_idx)) if 'tres' in locals() and hasattr(tres, 'names') else str(cls_idx)
-                            label = self._map_label_by_name(name) or self._determine_class_by_area(((bx2-bx1)*(by2-by1))/(w*h) if w*h>0 else 0)
-                            # attempt derive OBB from patch
-                            obb = self._derive_obb_from_patch(img_arr_full, bx1, by1, bx2, by2)
-                            if obb:
-                                obb['score'] = sc
-                                obb['label'] = label
-                                obb['orig_w'] = w
-                                obb['orig_h'] = h
-                                new_preds.append(obb)
-                            else:
-                                x_pct = float((bx1 / w) * 100.0)
-                                y_pct = float((by1 / h) * 100.0)
-                                width_pct = float(((bx2 - bx1) / w) * 100.0)
-                                height_pct = float(((by2 - by1) / h) * 100.0)
-                                new_preds.append({'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': 0.0, 'score': sc, 'label': label, 'orig_w': w, 'orig_h': h})
-                        if new_preds:
-                            logger.info('Tiles produced %d candidates, keeping %d after NMS', len(all_boxes), len(new_preds))
-                            predictions_data = new_preds
-            except Exception as e:
-                logger.debug('Erro durante tiling fallback: %s', e)
+            v_yolo = self._load_vehicle_yolo()
+            conf_v = float(os.getenv('YOLO_VEH_CONF', 0.25))
             
-        if has_obb and len(res.obb) > 0:
-            logger.info(f"Detectadas {len(res.obb)} caixas OBB")
-            items = res.obb
-        elif has_boxes and len(res.boxes) > 0:
-            logger.info(f"Detectadas {len(res.boxes)} caixas normais (BB)")
-            items = res.boxes
+            # 1. Detecção Global (Normal)
+            res_v_list = v_yolo(img, conf=conf_v, verbose=False)
+            for res_v in res_v_list:
+                if res_v.boxes:
+                    for det in res_v.boxes:
+                        label = self._map_label_by_name(res_v.names.get(int(det.cls.item()), ""))
+                        if label and not label.endswith('_plate'):
+                            x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
+                            predictions_data.append({
+                                'x': (x1 / w) * 100.0, 'y': (y1 / h) * 100.0,
+                                'width': ((x2 - x1) / w) * 100.0, 'height': ((y2 - y1) / h) * 100.0,
+                                'rotation': 0.0, 'score': float(det.conf.item()),
+                                'label': label, 'orig_w': w, 'orig_h': h
+                            })
+
+            # 2. TILING: Se detectar poucos veículos, vasculha a imagem em blocos (Longa Distância)
+            # Isso é o que o seu código antigo fazia para "enxergar" longe
+            if len(predictions_data) < 5: 
+                tiles = [
+                    (0, 0, w//2, h//2), (w//2, 0, w, h//2),
+                    (0, h//2, w//2, h), (w//2, h//2, w, h)
+                ]
+                for (tx1, ty1, tx2, ty2) in tiles:
+                    tile_img = img.crop((tx1, ty1, tx2, ty2))
+                    tile_res = v_yolo(tile_img, conf=conf_v + 0.1, verbose=False)
+                    for r in tile_res:
+                        if r.boxes:
+                            for det in r.boxes:
+                                label = self._map_label_by_name(r.names.get(int(det.cls.item()), ""))
+                                if label and not label.endswith('_plate'):
+                                    bx1, by1, bx2, by2 = det.xyxy.cpu().numpy().flatten().tolist()
+                                    # Converte coordenada do tile para coordenada global
+                                    predictions_data.append({
+                                        'x': ((bx1 + tx1) / w) * 100.0, 'y': ((by1 + ty1) / h) * 100.0,
+                                        'width': ((bx2 - bx1) / w) * 100.0, 'height': ((by2 - by1) / h) * 100.0,
+                                        'rotation': 0.0, 'score': float(det.conf.item()),
+                                        'label': label, 'orig_w': w, 'orig_h': h
+                                    })
+        except Exception as e:
+            logger.error(f"Erro veículos: {e}")
 
         return {'items': predictions_data, 'width': w, 'height': h}
 
@@ -570,64 +376,6 @@ class NewModel(LabelStudioMLBase):
             order = order[inds + 1]
         return keep
 
-    def _derive_obb_from_patch(self, img_arr, x1_px, y1_px, x2_px, y2_px):
-        """Try derive oriented bbox from a cropped patch using contours/minAreaRect."""
-        if cv2 is None:
-            return None
-        try:
-            img_h, img_w = img_arr.shape[:2]
-            x1_px = max(0, int(x1_px))
-            y1_px = max(0, int(y1_px))
-            x2_px = min(img_w - 1, int(x2_px))
-            y2_px = min(img_h - 1, int(y2_px))
-            if x2_px <= x1_px or y2_px <= y1_px:
-                return None
-            patch = img_arr[y1_px:y2_px, x1_px:x2_px]
-            if patch.size == 0:
-                return None
-            gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
-            blur = cv2.GaussianBlur(gray, (5,5), 0)
-            _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,3))
-            closed = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel)
-            contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                edges = cv2.Canny(blur, 50, 150)
-                contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if not contours:
-                    return None
-            largest = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(largest) < 20:
-                return None
-            rect = cv2.minAreaRect(largest)
-            # rect: ((cx,cy),(bw,bh), angle)
-            (cx_p, cy_p), (bw_px, bh_px), angle = rect
-            # translate center to global coords
-            cx = x1_px + cx_p
-            cy = y1_px + cy_p
-            # normalize angle/size: OpenCV angle convention requires normalization
-            # ensure bw_px is width along the rotated box reference
-            if bw_px < bh_px:
-                # swap to keep bw_px >= bh_px and adjust angle
-                bw_px, bh_px = bh_px, bw_px
-                angle = angle + 90.0
-            # normalize angle to [-180,180)
-            while angle >= 180.0:
-                angle -= 360.0
-            while angle < -180.0:
-                angle += 360.0
-
-            # compute top-left from center (consistent with upstream xywhr handling)
-            if img_w == 0 or img_h == 0:
-                return None
-            x_pct = float(((cx - bw_px / 2.0) / img_w) * 100.0)
-            y_pct = float(((cy - bh_px / 2.0) / img_h) * 100.0)
-            width_pct = float((bw_px / img_w) * 100.0)
-            height_pct = float((bh_px / img_h) * 100.0)
-            rotation_deg = float(angle)
-            return {'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': rotation_deg}
-        except Exception:
-            return None
     
     def _async_debug_dump(self, image_url, img, res, predictions_data):
         try:
@@ -849,17 +597,53 @@ class NewModel(LabelStudioMLBase):
                 }
                 results.append(res_item)
                 total_score += score
-            except Exception:
+            except Exception as e:
+                logger.error(f"Erro ao formatar item de predição: {e}")
                 continue
 
         avg = total_score / len(results) if results else 0
-        return [{'result': results, 'model_version': 'yolov11-obb', 'score': avg}]
+        # Retorna a estrutura correta para o Label Studio
+        return [{'result': results, 'model_version': 'yolov11-combined', 'score': avg}]
+
     def _submit_predictions(self, task_id, predictions, project_id):
         if not self.client:
             logger.error('Cliente Label Studio não está disponível')
             return
         try:
             project = self.client.get_project(project_id)
+            # Dump payload for debugging to inspect why some labels (e.g., plates) might be ignored
+            try:
+                debug_root = os.path.join(os.path.dirname(__file__), 'debug')
+                os.makedirs(debug_root, exist_ok=True)
+                payload = {
+                    'task_id': task_id,
+                    'result': predictions[0]['result'],
+                    'model_version': predictions[0].get('model_version', 'yolov11-auto-label'),
+                    'score': predictions[0].get('score', 0)
+                }
+                dump_path = os.path.join(debug_root, f'submit_payload_task_{task_id}_{str(uuid4())[:8]}.json')
+                with open(dump_path + '.tmp', 'w', encoding='utf8') as jf:
+                    json.dump(payload, jf, indent=2, ensure_ascii=False)
+                os.replace(dump_path + '.tmp', dump_path)
+                logger.debug('Payload de predições salvo: %s', dump_path)
+            except Exception as e:
+                logger.debug('Falha ao salvar payload de debug: %s', e)
+            # Also dump project's label config (if available) to help debug missing labels in UI
+            try:
+                try:
+                    label_config = project.get_label_config()
+                except Exception:
+                    # fallback: some SDK versions use .label_config
+                    label_config = getattr(project, 'label_config', None)
+                if label_config:
+                    lc_path = os.path.join(debug_root, f'project_{project_id}_label_config_{str(uuid4())[:8]}.xml')
+                    with open(lc_path + '.tmp', 'w', encoding='utf8') as lf:
+                        lf.write(label_config)
+                    os.replace(lc_path + '.tmp', lc_path)
+                    logger.debug('Project label_config saved: %s', lc_path)
+            except Exception as e:
+                logger.debug('Falha ao salvar project label_config: %s', e)
+
             project.create_prediction(
                 task_id=task_id,
                 result=predictions[0]['result'],
@@ -895,7 +679,7 @@ class NewModel(LabelStudioMLBase):
             except Exception as e:
                 logger.error('Erro ao processar tarefa %s: %s', t.get('id'), e)
 
-    def predict(self, tasks):
+    def predict(self, tasks, **kwargs):
         predictions = []
         for task in tasks:
             try:
@@ -903,11 +687,64 @@ class NewModel(LabelStudioMLBase):
                 raw_url = data.get('image') or data.get('image_url') or list(data.values())[0]
                 image_url = get_absolute_url(raw_url)
                 
-                pred = self._predict_image(image_url)
+                # Obtém predições combinadas
+                pred_data = self._predict_image(image_url)
                 
-                # CORREÇÃO: Usamos 'items' e estendemos a lista de resultados
-                preds = self._generate_results(pred['items'])
-                predictions.extend(preds)
+                # O segredo: passamos a lista completa para o gerador de resultados
+                results = self._generate_results(pred_data['items'])
+                
+                if results:
+                    predictions.append(results[0])
+                else:
+                    predictions.append({'result': []})
             except Exception as e:
-                logger.error('Erro na predição: %s', e)
+                logger.error(f'Erro na predição: {e}')
+                predictions.append({'result': []})
+        return predictions
+        predictions = []
+        for task in tasks:
+            try:
+                data = task.get('data') or {}
+                raw_url = data.get('image') or data.get('image_url') or list(data.values())[0]
+                image_url = get_absolute_url(raw_url)
+                
+                pred_data = self._predict_image(image_url)
+                
+                # Gera o formato final para todos os itens detectados
+                formatted_preds = self._generate_results(pred_data['items'])
+                
+                if formatted_preds:
+                    # formatted_preds[0] contém o dicionário {'result': [...]}
+                    predictions.append(formatted_preds[0])
+                else:
+                    predictions.append({'result': []})
+            except Exception as e:
+                logger.error(f'Erro na predição: {e}')
+                predictions.append({'result': []})
+        return predictions
+        """Método principal chamado pelo Label Studio para obter predições."""
+        predictions = []
+        for task in tasks:
+            try:
+                data = task.get('data') or {}
+                # Tenta encontrar a URL da imagem em campos comuns
+                raw_url = data.get('image') or data.get('image_url') or list(data.values())[0]
+                image_url = get_absolute_url(raw_url)
+                
+                # 1. Obtém os dados brutos da detecção (veículos + placas)
+                pred_data = self._predict_image(image_url)
+                
+                # 2. Converte para o formato JSON que o Label Studio entende
+                # _generate_results retorna a lista formatada com 'result', 'score', etc.
+                formatted_preds = self._generate_results(pred_data['items'])
+                
+                if formatted_preds:
+                    predictions.append(formatted_preds[0])
+                else:
+                    predictions.append({'result': []})
+
+            except Exception as e:
+                logger.error(f'Erro na predição da tarefa {task.get("id")}: {e}')
+                predictions.append({'result': []})
+                
         return predictions

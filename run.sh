@@ -141,16 +141,19 @@ auto_label() {
 
         # Verificações de modelos (sem download automático)
         if [ -f "$YOLO_PLATE_MODEL_PATH" ]; then
-            echo "[SUCESSO] Plate detector encontrado em: $YOLO_PLATE_MODEL_PATH"
+            echo "[SUCESSO] YOLO Plate detector encontrado em: $YOLO_PLATE_MODEL_PATH"
         else
-            echo "[AVISO] Plate detector não encontrado em: $YOLO_PLATE_MODEL_PATH"
-            echo "[AVISO] O backend verificará os modelos em tempo de execução."
+            echo "[AVISO] YOLO Plate detector não encontrado em: $YOLO_PLATE_MODEL_PATH"
+            echo "[AVISO] Tentando download..."
+            python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_model.py
         fi
 
         if [ -f "$YOLO_VEHICLE_MODEL_PATH" ]; then
-            echo "[SUCESSO] Vehicle detector encontrado em: $YOLO_VEHICLE_MODEL_PATH"
+            echo "[SUCESSO] YOLO Vehicle detector encontrado em: $YOLO_VEHICLE_MODEL_PATH"
         else
-            echo "[AVISO] Vehicle detector não encontrado em: $YOLO_VEHICLE_MODEL_PATH"
+            echo "[AVISO] YOLO Vehicle detector não encontrado em: $YOLO_VEHICLE_MODEL_PATH"
+            echo "[AVISO] Tentando download..."
+            python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_model.py
         fi
 
         echo "Iniciando Auto-labeling CLI (YOLOv11)..."

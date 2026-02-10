@@ -16,7 +16,7 @@ logs/
 !*checkpoints/*.pt
 
 # YOLO models (pretrained weights)
-label-studio-ml-backend/label_studio_ml/examples/yolov11/models/
+label-studio-ml-backend/label_studio_ml/examples/yolov11/models/*
 
 # Temp
 *.tmp

@@ -231,244 +231,73 @@ class NewModel(LabelStudioMLBase):
         except Exception:
             pass
 
+        # Simplified: usar apenas boxes.xyxy e aceitar somente classes mapeadas
         predictions_data = []
         try:
-            # Verifica se existem detecções OBB primeiro
-            has_obb = hasattr(res, 'obb') and res.obb is not None
-            # Verifica se existem detecções de Boxes comuns
-            has_boxes = hasattr(res, 'boxes') and res.boxes is not None
-            
-            items = []
-            if has_obb and len(res.obb) > 0:
-                items = res.obb
-            elif has_boxes and len(res.boxes) > 0:
-                items = res.boxes
-            else:
-                # tentar fallback a partir de máscaras (quando o modelo entrega masks)
-                if hasattr(res, 'masks') and res.masks is not None and cv2 is not None:
-                    try:
-                        # tentar extrair masks em formato numpy (N,H,W)
-                        masks_np = None
-                        try:
-                            masks_np = res.masks.data.cpu().numpy()
-                        except Exception:
-                            try:
-                                masks_np = np.array(res.masks)
-                            except Exception:
-                                masks_np = None
-
-                        if masks_np is not None and masks_np.ndim == 3:
-                            logger.info('Fallback: gerando OBBs a partir de máscaras (%d masks)', masks_np.shape[0])
-                            for mi in range(masks_np.shape[0]):
-                                mask = (masks_np[mi].astype('uint8') * 255)
-                                # encontra contornos
-                                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                if not contours:
-                                    continue
-                                largest = max(contours, key=cv2.contourArea)
-                                if cv2.contourArea(largest) < 10:
-                                    continue
-                                rect = cv2.minAreaRect(largest)
-                                ((cx, cy), (bw, bh), angle) = rect
-                                # converter para porcentagens relativas
-                                x_pct = float(((cx - bw/2) / w) * 100.0)
-                                y_pct = float(((cy - bh/2) / h) * 100.0)
-                                width_pct = float((bw / w) * 100.0)
-                                height_pct = float((bh / h) * 100.0)
-                                rotation_deg = float(angle)
-                                # sem score/label conhecido; usar heurística de area
-                                area_frac = (bw * bh) / (w * h)
-                                label = self._determine_class_by_area(area_frac)
-                                predictions_data.append({
-                                    'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
-                                    'rotation': rotation_deg, 'score': 0.5, 'label': label,
-                                    'orig_w': w, 'orig_h': h
-                                })
-                            if predictions_data:
-                                logger.info('Fallback OBBs gerados a partir de máscaras: %d', len(predictions_data))
-                                # obter items a partir de predictions_data para geração posterior
-                                return {'items': predictions_data, 'width': w, 'height': h}
-                    except Exception as e:
-                        logger.debug('Erro no fallback de máscaras->OBB: %s', e)
-
-                logger.info("Nenhuma detecção encontrada na imagem.")
+            if not (hasattr(res, 'boxes') and res.boxes is not None):
+                logger.info('Nenhuma detecção em boxes (xyxy) encontrada.')
                 return {'items': [], 'width': w, 'height': h}
-            
-            # debug: número de itens antes do parsing
-            try:
-                n_items = len(items)
-            except Exception:
+            xyxy_arr = getattr(res.boxes, 'xyxy', None)
+            conf_arr = getattr(res.boxes, 'conf', None)
+            cls_arr = getattr(res.boxes, 'cls', None)
+            if xyxy_arr is None:
+                return {'items': [], 'width': w, 'height': h}
+            xyxy = xyxy_arr.cpu().numpy()
+            confs = conf_arr.cpu().numpy() if conf_arr is not None else np.zeros((len(xyxy),), dtype=float)
+            clss = cls_arr.cpu().numpy() if cls_arr is not None else np.zeros((len(xyxy),), dtype=int)
+            for b, sc, cls_idx in zip(xyxy, confs, clss):
                 try:
-                    n_items = items.shape[0]
+                    bx1, by1, bx2, by2 = [float(x) for x in b.tolist()]
                 except Exception:
-                    n_items = -1
-            logger.debug('Número bruto de detecções (items): %s', n_items)
-
-            for idx, det in enumerate(items):
-                # conf / cls leitura robusta
-                try:
-                    conf = float(det.conf.item())
-                except Exception:
-                    try:
-                        conf = float(getattr(det, 'conf', 0.0))
-                    except Exception:
-                        conf = 0.0
-                try:
-                    cls_idx = int(det.cls.item())
-                except Exception:
-                    try:
-                        cls_idx = int(getattr(det, 'cls', 0))
-                    except Exception:
-                        cls_idx = 0
-                name = res.names.get(cls_idx, str(cls_idx))
-                label = self._map_label_by_name(name) or self._determine_class_by_area(0)
-
-                # Extração para OBB (Oriented Bounding Box)
-                rotation_deg = 0.0
-                x_pct = y_pct = width_pct = height_pct = 0.0
-                try:
-                    if hasattr(det, 'xywhr') and det.xywhr is not None:
-                        xywhr = det.xywhr.cpu().numpy().flatten().tolist()
-                        if len(xywhr) == 5:
-                            cx, cy, bw, bh, rotation_rad = xywhr
-                            rotation_deg = float(np.degrees(rotation_rad))
-                            x_pct = float(((cx - bw/2) / w) * 100.0)
-                            y_pct = float(((cy - bh/2) / h) * 100.0)
-                            width_pct = float((bw / w) * 100.0)
-                            height_pct = float((bh / h) * 100.0)
-                        else:
-                            # Fallback se o formato xywhr for inesperado
-                            logger.debug('Formato xywhr inesperado: %s', xywhr)
-                            continue
-                    else:
-                        # Fallback para BB comum
-                        xyxy = det.xyxy.cpu().numpy().flatten().tolist()
-                        x1, y1, x2, y2 = xyxy
-                        x_pct = float((x1 / w) * 100.0)
-                        y_pct = float((y1 / h) * 100.0)
-                        width_pct = float(((x2 - x1) / w) * 100.0)
-                        height_pct = float(((y2 - y1) / h) * 100.0)
-                        rotation_deg = 0.0
-                    
-                        # Tentativa de derivar OBB a partir do patch da caixa (Canny -> minAreaRect)
-                        try:
-                            if cv2 is not None:
-                                # crop patch in pixel coords
-                                x1_px = max(0, int(round(x1)))
-                                y1_px = max(0, int(round(y1)))
-                                x2_px = min(w, int(round(x2)))
-                                y2_px = min(h, int(round(y2)))
-                                if x2_px > x1_px and y2_px > y1_px:
-                                    arr = np.array(img)
-                                    patch = arr[y1_px:y2_px, x1_px:x2_px]
-                                    if patch.size != 0:
-                                        gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
-                                        blur = cv2.GaussianBlur(gray, (5,5), 0)
-                                        edges = cv2.Canny(blur, 50, 150)
-                                        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                        if contours:
-                                            largest = max(contours, key=cv2.contourArea)
-                                            if cv2.contourArea(largest) > 10:
-                                                rect = cv2.minAreaRect(largest)
-                                                ((cx_p, cy_p), (bw_px, bh_px), angle) = rect
-                                                # convert to global coords
-                                                cx = x1_px + cx_p
-                                                cy = y1_px + cy_p
-                                                rotation_deg = float(angle)
-                                                width_pct = float((bw_px / w) * 100.0)
-                                                height_pct = float((bh_px / h) * 100.0)
-                                                x_pct = float(((cx - bw_px/2) / w) * 100.0)
-                                                y_pct = float(((cy - bh_px/2) / h) * 100.0)
-                                                logger.debug('OBB derivado do patch: angle=%.2f bw=%d bh=%d', rotation_deg, int(bw_px), int(bh_px))
-                        except Exception as e:
-                            logger.debug('Erro derivando OBB do patch: %s', e)
-                except Exception as e:
-                    logger.debug('Erro extraindo coords de det %d: %s', idx, e)
                     continue
-
-                logger.debug('Det %d: name=%s mapped_label=%s conf=%.4f bbox=[x=%.2f y=%.2f w=%.2f h=%.2f rot=%.2f]', idx, name, label, conf, x_pct, y_pct, width_pct, height_pct, rotation_deg)
-
-                predictions_data.append({
-                    'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct,
-                    'rotation': rotation_deg, 'score': conf, 'label': label,
-                    'orig_w': w, 'orig_h': h
-                })
-
-            logger.debug('Predictions_data length after parsing items: %d', len(predictions_data))
+                name = res.names.get(int(cls_idx), str(int(cls_idx))) if hasattr(res, 'names') else str(int(cls_idx))
+                label = self._map_label_by_name(name)
+                if label is None:
+                    logger.debug('Descartando detecção não mapeada: %s', name)
+                    continue
+                x_pct = float((bx1 / w) * 100.0)
+                y_pct = float((by1 / h) * 100.0)
+                width_pct = float(((bx2 - bx1) / w) * 100.0)
+                height_pct = float(((by2 - by1) / h) * 100.0)
+                predictions_data.append({'x': x_pct, 'y': y_pct, 'width': width_pct, 'height': height_pct, 'rotation': 0.0, 'score': float(sc), 'label': label, 'orig_w': w, 'orig_h': h})
         except Exception as e:
             logger.error('Erro ao interpretar resultados YOLO: %s', e)
             raise
-        
-        if has_obb and len(res.obb) > 0:
-            logger.info(f"Detectadas {len(res.obb)} caixas OBB")
-            items = res.obb
-        elif has_boxes and len(res.boxes) > 0:
-            logger.info(f"Detectadas {len(res.boxes)} caixas normais (BB)")
-            items = res.boxes
-
         return {'items': predictions_data, 'width': w, 'height': h}
     
     def _generate_results(self, items):
         results = []
         total_score = 0.0
-        
+
         for it in items:
-            label = it['label']
-            total_score += it['score']
-            # `from_name` must match the RectangleLabels control name in your label config
-            control_name = 'label'  # your XML uses name="label" for RectangleLabels
+            try:
+                score = float(it.get('score', 0.0))
+            except Exception:
+                score = 0.0
+            label = it.get('label', '')
             res_item = {
                 'id': str(uuid4()),
-                'from_name': control_name,
+                'from_name': 'label',
                 'to_name': 'image',
-                'original_width': it['orig_w'],
-                'original_height': it['orig_h'],
+                'original_width': it.get('orig_w', 0),
+                'original_height': it.get('orig_h', 0),
                 'value': {
-                    'x': it['x'],
-                    'y': it['y'],
-                    'width': it['width'],
-                    'height': it['height'],
-                    'rotation': it['rotation'],
+                    'x': it.get('x', 0),
+                    'y': it.get('y', 0),
+                    'width': it.get('width', 0),
+                    'height': it.get('height', 0),
+                    'rotation': it.get('rotation', 0),
                     'rectanglelabels': [label]
                 },
-                'score': it['score'],
+                'score': score,
                 'type': 'rectanglelabels',
                 'readonly': False
             }
             results.append(res_item)
-            
-        avg = total_score / max(len(results), 1) if results else 0
-        return [{'result': results, 'model_version': 'yolov11-obb', 'score': avg}]
-        results = []
-        total_score = 0.0
-        
-        for it in items:
-            label = it['label']
-            total_score += it['score']
-            
-            # CORREÇÃO CRUCIAL: 'from_name' deve ser o nome do Label no XML (car, bus, etc)
-            # Como seu XML tem um RectangleLabels para cada classe, o from_name deve ser a própria classe.
-            results.append({
-                'id': str(uuid4()),
-                'from_name': label, # Antes era 'label', agora bate com o XML
-                'to_name': 'image',
-                'original_width': it['orig_w'],
-                'original_height': it['orig_h'],
-                'value': {
-                    'x': it['x'],
-                    'y': it['y'],
-                    'width': it['width'],
-                    'height': it['height'],
-                    'rotation': it['rotation'],
-                    'rectanglelabels': [label]
-                },
-                'score': it['score'],
-                'type': 'rectanglelabels',
-                'readonly': False
-            })
-            
-        avg = total_score / max(len(results), 1) if results else 0
-        return [{'result': results, 'model_version': 'yolov11-obb', 'score': avg}]
+            total_score += score
+
+        avg = total_score / len(results) if results else 0
+        return [{'result': results, 'model_version': 'yolov11-bb', 'score': avg}]
     def _submit_predictions(self, task_id, predictions, project_id):
         if not self.client:
             logger.error('Cliente Label Studio não está disponível')

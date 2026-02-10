@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: --- LIMPEZA DE MEMÓRIA ---
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND=" & set "MODEL_DIR="
 
 set "ENV_FILE=.env"
 
@@ -82,7 +82,7 @@ if "!SELECTED_BACKEND!"=="" (
     echo SELECTED_BACKEND=!SELECTED_BACKEND!>> "%ENV_FILE%"
 )
 
-:: Pergunta/define se debug deve estar ativo (grava em .env)
+:: Pergunta/define se debug deve estar ativo
 if "!DEBUG_DUMP!"=="" (
     set /p "IN_DBG=[CONFIGURACAO] Habilitar debug dumps (json/png)? (S/n): "
     if /I "!IN_DBG!"=="n" (
@@ -98,6 +98,18 @@ if "!SELECTED_BACKEND!"=="YOLO" goto flow_yolo
 goto flow_sam2
 
 :flow_yolo
+:: --- CORREÇÃO MODEL_DIR ---
+if "!MODEL_DIR!"=="" (
+    set "DEFAULT_MD=%CD%\model_runs"
+    set /p "IN_MD=[CONFIGURACAO] Diretorio para logs/modelos (Enter para padrao): "
+    if "!IN_MD!"=="" ( set "MODEL_DIR=!DEFAULT_MD!" ) else ( set "MODEL_DIR=!IN_MD!" )
+    echo MODEL_DIR=!MODEL_DIR!>> "%ENV_FILE%"
+)
+
+:: Garante a criação da pasta física para evitar o crash no Python
+if not exist "!MODEL_DIR!" mkdir "!MODEL_DIR!"
+set "MODEL_DIR=!MODEL_DIR!"
+
 :: --- CONFIGURAÇÃO YOLO PLATE ---
 if "!YOLO_PLATE_MODEL_PATH!"=="" (
     set /p "IN_YMP=[CONFIGURACAO] Caminho YOLOv11 Plate Model (Enter para padrao): "
@@ -109,32 +121,30 @@ if "!YOLO_PLATE_MODEL_PATH!"=="" (
     echo YOLO_PLATE_MODEL_PATH=!YOLO_PLATE_MODEL_PATH!>> "%ENV_FILE%"
 )
 
-:: --- CONFIGURAÇÃO YOLO VEHICLE (YOLOv11x) ---
+:: --- CONFIGURAÇÃO YOLO VEHICLE ---
 if "!YOLO_VEHICLE_MODEL_PATH!"=="" (
     set /p "IN_YVP=[CONFIGURACAO] Caminho YOLOv11 Vehicle Model (Enter para padrao): "
     if "!IN_YVP!"=="" (
-        set "YOLO_VEHICLE_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11\models\yolo11x.pt"
+         set "YOLO_VEHICLE_MODEL_PATH=label-studio-ml-backend\label_studio_ml\examples\yolov11\models\yolo11x.pt"
     ) else (
         set "YOLO_VEHICLE_MODEL_PATH=!IN_YVP!"
     )
     echo YOLO_VEHICLE_MODEL_PATH=!YOLO_VEHICLE_MODEL_PATH!>> "%ENV_FILE%"
 )
 
-:: Verificação de arquivos (sem tentativa de download automatica)
+:: Verificação de arquivos
 if exist "!YOLO_PLATE_MODEL_PATH!" (
     echo [SUCESSO] YOLO Plate detector encontrado em: !YOLO_PLATE_MODEL_PATH!
 ) else (
-    echo [AVISO] YOLO Plate detector nao encontrado em: !YOLO_PLATE_MODEL_PATH!
-    echo [AVISO] Tentando download...
-    python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_model.py
+    echo [AVISO] YOLO Plate detector nao encontrado. Tentando download...
+    python .\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_model.py
 )
 
 if exist "!YOLO_VEHICLE_MODEL_PATH!" (
     echo [SUCESSO] YOLO Vehicle detector encontrado em: !YOLO_VEHICLE_MODEL_PATH!
 ) else (
-    echo [AVISO] YOLO Vehicle detector nao encontrado em: !YOLO_VEHICLE_MODEL_PATH!
-    echo [AVISO] Tentando download...
-    python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_model.py
+    echo [AVISO] YOLO Vehicle detector nao encontrado. Tentando download...
+    python .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_model.py
 )
 
 :start_yolo_logic
@@ -143,6 +153,8 @@ call ".\labelStudioVenv\Scripts\activate.bat"
 pushd ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate"
 set "LABEL_STUDIO_URL=!LABEL_STUDIO_URL!"
 set "DEVICE=!DEVICE!"
+set "MODEL_DIR=!MODEL_DIR!"
+set "LABEL_STUDIO_API_KEY=!PERSONAL_TOKEN!"
 python auto_label_cli.py --model_path="!YOLO_PLATE_MODEL_PATH!" --vehicle_model_path="!YOLO_VEHICLE_MODEL_PATH!"
 popd
 pause
@@ -179,5 +191,5 @@ goto menu
 :reset_env
 echo Apagando configuracoes e limpando memoria...
 if exist "%ENV_FILE%" del "%ENV_FILE%"
-set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND="
+set "DEVICE=" & set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND=" & set "MODEL_DIR="
 goto init_config

@@ -13,7 +13,7 @@ load_env() {
 
 # Função para limpar memória (variáveis da sessão)
 reset_memory() {
-    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND
+    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND MODEL_DIR
 }
 
 init_config() {
@@ -125,6 +125,19 @@ auto_label() {
     export LABEL_STUDIO_URL=$LABEL_STUDIO_URL
 
     if [ "$SELECTED_BACKEND" = "YOLO" ]; then
+        # --- CORREÇÃO MODEL_DIR ---
+        if [ -z "$MODEL_DIR" ]; then
+            # Define o caminho padrão baseado no diretório atual
+            DEFAULT_MODEL_DIR="$(pwd)/model_runs"
+            read -p "[CONFIGURACAO] Diretorio para logs/modelos (Enter para padrao): " IN_MD
+            MODEL_DIR=${IN_MD:-"$DEFAULT_MODEL_DIR"}
+            echo "MODEL_DIR=$MODEL_DIR" >> "$ENV_FILE"
+        fi
+        
+        # Garante que a pasta física existe para evitar o TypeError no Python
+        mkdir -p "$MODEL_DIR"
+        export MODEL_DIR
+
         # --- CONFIGURAÇÃO YOLO PLATE ---
         if [ -z "$YOLO_PLATE_MODEL_PATH" ]; then
             read -p "[CONFIGURACAO] Caminho YOLO Plate Model (Enter para padrao): " IN_YMP
@@ -145,7 +158,7 @@ auto_label() {
         else
             echo "[AVISO] YOLO Plate detector não encontrado em: $YOLO_PLATE_MODEL_PATH"
             echo "[AVISO] Tentando download..."
-            python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate\download_model.py
+            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/download_model.py
         fi
 
         if [ -f "$YOLO_VEHICLE_MODEL_PATH" ]; then
@@ -153,7 +166,7 @@ auto_label() {
         else
             echo "[AVISO] YOLO Vehicle detector não encontrado em: $YOLO_VEHICLE_MODEL_PATH"
             echo "[AVISO] Tentando download..."
-            python3 .\label-studio-ml-backend\label_studio_ml\examples\yolov11\download_model.py
+            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11/download_model.py
         fi
 
         echo "Iniciando Auto-labeling CLI (YOLOv11)..."

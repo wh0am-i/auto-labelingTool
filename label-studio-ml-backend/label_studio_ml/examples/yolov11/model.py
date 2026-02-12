@@ -3,15 +3,15 @@ Backward-compatible YOLOv11 backend for vehicle detection (yolo11x).
 
 This module provides a `NewModel` that uses a yolo11x checkpoint by
 default (examples/yolov11/models/yolo11x.pt) and maps detections to
-classes defined in `sam2_classes.json` (vehicles, trucks, buses, etc.).
+classes defined in `classes.json` (vehicles, trucks, buses, etc.).
 """
 
 def load_classes_config():
     candidates = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'sam2_classes.json')),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sam2_classes.json')),
-        os.path.join(os.path.dirname(__file__), 'sam2_classes.json'),
-        os.path.abspath(os.path.join(os.getcwd(), 'sam2_classes.json')),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'classes.json')),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'classes.json')),
+        os.path.join(os.path.dirname(__file__), 'classes.json'),
+        os.path.abspath(os.path.join(os.getcwd(), 'classes.json')),
     ]
     for p in candidates:
         if os.path.exists(p):
@@ -52,7 +52,7 @@ class NewModel(LabelStudioMLBase):
     """Simple YOLOv11 backend compatible with the auto-labeling CLI.
 
     Detects objects with `ultralytics.YOLO` and maps detections to classes
-    defined in `sam2_classes.json` using keyword matching and area heuristics.
+    defined in `classes.json` using keyword matching and area heuristics.
     """
 
     def __init__(self, *args, **kwargs):

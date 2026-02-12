@@ -13,7 +13,7 @@ load_env() {
 
 # Função para limpar memória (variáveis da sessão)
 reset_memory() {
-    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND MODEL_DIR
+    unset DEVICE LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND MODEL_DIR DEBUG_DUMP
 }
 
 init_config() {
@@ -85,16 +85,19 @@ start_servers() {
 auto_label() {
     load_env
     
-    # Tokens
+    # --- TOKENS (Garantindo export para o Python) ---
     if [ -z "$PERSONAL_TOKEN" ]; then
         read -p "[CONFIGURACAO] Informe o PERSONAL_TOKEN do Label Studio: " IN_PT
         [ ! -z "$IN_PT" ] && PERSONAL_TOKEN=$IN_PT && echo "PERSONAL_TOKEN=$PERSONAL_TOKEN" >> "$ENV_FILE"
     fi
+    export PERSONAL_TOKEN=$PERSONAL_TOKEN
+    export LABEL_STUDIO_API_KEY=$PERSONAL_TOKEN
 
     if [ -z "$LEGACY_TOKEN" ]; then
         read -p "[CONFIGURACAO] Informe o LEGACY_TOKEN do Label Studio: " IN_LT
         [ ! -z "$IN_LT" ] && LEGACY_TOKEN=$IN_LT && echo "LEGACY_TOKEN=$LEGACY_TOKEN" >> "$ENV_FILE"
     fi
+    export LEGACY_TOKEN=$LEGACY_TOKEN
 
     # Debug Dump config
     if [ -z "$DEBUG_DUMP" ]; then
@@ -120,75 +123,53 @@ auto_label() {
         echo "SELECTED_BACKEND=$SELECTED_BACKEND" >> "$ENV_FILE"
     fi
 
-    export LABEL_STUDIO_API_KEY=$PERSONAL_TOKEN
     export DEVICE=$DEVICE
     export LABEL_STUDIO_URL=$LABEL_STUDIO_URL
 
     if [ "$SELECTED_BACKEND" = "YOLO" ]; then
-        # --- CORREÇÃO MODEL_DIR ---
+        # --- MODEL_DIR ---
         if [ -z "$MODEL_DIR" ]; then
-            # Define o caminho padrão baseado no diretório atual
             DEFAULT_MODEL_DIR="$(pwd)/model_runs"
             read -p "[CONFIGURACAO] Diretorio para logs/modelos (Enter para padrao): " IN_MD
             MODEL_DIR=${IN_MD:-"$DEFAULT_MODEL_DIR"}
             echo "MODEL_DIR=$MODEL_DIR" >> "$ENV_FILE"
         fi
-        
-        # Garante que a pasta física existe para evitar o TypeError no Python
         mkdir -p "$MODEL_DIR"
         export MODEL_DIR
 
-        # --- CONFIGURAÇÃO YOLO PLATE ---
-        if [ -z "$YOLO_PLATE_MODEL_PATH" ]; then
-            read -p "[CONFIGURACAO] Caminho YOLO Plate Model (Enter para padrao): " IN_YMP
-            YOLO_PLATE_MODEL_PATH=${IN_YMP:-"label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/models/best.pt"}
-            echo "YOLO_PLATE_MODEL_PATH=$YOLO_PLATE_MODEL_PATH" >> "$ENV_FILE"
+        # --- CONFIGURAÇÃO YOLO PATHS ---
+        YOLO_PLATE_MODEL_PATH=${YOLO_PLATE_MODEL_PATH:-"label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/models/best.pt"}
+        YOLO_VEHICLE_MODEL_PATH=${YOLO_VEHICLE_MODEL_PATH:-"label-studio-ml-backend/label_studio_ml/examples/yolov11/models/yolo11x.pt"}
+
+        # --- CORREÇÃO DO DOWNLOAD (Entrando na pasta antes de executar) ---
+        if [ ! -f "$YOLO_PLATE_MODEL_PATH" ]; then
+            echo "[AVISO] YOLO Plate detector não encontrado. Baixando..."
+            pushd "./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/" > /dev/null
+            python3 download_model.py
+            popd > /dev/null
         fi
 
-        # --- CONFIGURAÇÃO YOLO VEHICLE ---
-        if [ -z "$YOLO_VEHICLE_MODEL_PATH" ]; then
-            read -p "[CONFIGURACAO] Caminho YOLO Vehicle Model (Enter para padrao): " IN_YVP
-            YOLO_VEHICLE_MODEL_PATH=${IN_YVP:-"label-studio-ml-backend/label_studio_ml/examples/yolov11/models/yolo11x.pt"}
-            echo "YOLO_VEHICLE_MODEL_PATH=$YOLO_VEHICLE_MODEL_PATH" >> "$ENV_FILE"
-        fi
-
-        # Verificações de modelos (sem download automático)
-        if [ -f "$YOLO_PLATE_MODEL_PATH" ]; then
-            echo "[SUCESSO] YOLO Plate detector encontrado em: $YOLO_PLATE_MODEL_PATH"
-        else
-            echo "[AVISO] YOLO Plate detector não encontrado em: $YOLO_PLATE_MODEL_PATH"
-            echo "[AVISO] Tentando download..."
-            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/download_model.py
-        fi
-
-        if [ -f "$YOLO_VEHICLE_MODEL_PATH" ]; then
-            echo "[SUCESSO] YOLO Vehicle detector encontrado em: $YOLO_VEHICLE_MODEL_PATH"
-        else
-            echo "[AVISO] YOLO Vehicle detector não encontrado em: $YOLO_VEHICLE_MODEL_PATH"
-            echo "[AVISO] Tentando download..."
-            python3 ./label-studio-ml-backend/label_studio_ml/examples/yolov11/download_model.py
+        if [ ! -f "$YOLO_VEHICLE_MODEL_PATH" ]; then
+            echo "[AVISO] YOLO Vehicle detector não encontrado. Baixando..."
+            pushd "./label-studio-ml-backend/label_studio_ml/examples/yolov11/" > /dev/null
+            python3 download_model.py
+            popd > /dev/null
         fi
 
         echo "Iniciando Auto-labeling CLI (YOLOv11)..."
         source ./labelStudioVenv/bin/activate
+        
+        # Salva o diretório raiz antes do pushd
+        ROOT_DIR="$(pwd)"
+        
         pushd ./label-studio-ml-backend/label_studio_ml/examples/yolov11-plate > /dev/null
-        python3 auto_label_cli.py --model_path="$YOLO_PLATE_MODEL_PATH" --vehicle_model_path="$YOLO_VEHICLE_MODEL_PATH"
+        # Executa usando caminhos absolutos baseados na raiz do projeto
+        python3 auto_label_cli.py \
+            --model_path="$ROOT_DIR/$YOLO_PLATE_MODEL_PATH" \
+            --vehicle_model_path="$ROOT_DIR/$YOLO_VEHICLE_MODEL_PATH"
         popd > /dev/null
     else
         # Fluxo SAM2
-        if [ -z "$MODEL_CHECKPOINT" ]; then
-            read -p "[CONFIGURACAO] Caminho Checkpoint (Enter para padrao): " IN_CP
-            MODEL_CHECKPOINT=${IN_CP:-"label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image/checkpoints/sam2.1_hiera_large.pt"}
-            echo "MODEL_CHECKPOINT=$MODEL_CHECKPOINT" >> "$ENV_FILE"
-        fi
-
-        if [ -z "$MODEL_CONFIG" ]; then
-            read -p "[CONFIGURACAO] Nome do Model Config (Enter para padrao): " IN_CFG
-            MODEL_CONFIG=${IN_CFG:-"sam2.1/sam2.1_hiera_l"}
-            echo "MODEL_CONFIG=$MODEL_CONFIG" >> "$ENV_FILE"
-        fi
-
-        echo "Iniciando Auto-labeling CLI (SAM2)..."
         source ./labelStudioVenv/bin/activate
         pushd ./label-studio-ml-backend/label_studio_ml/examples/segment_anything_2_image > /dev/null
         python3 auto_label_cli.py

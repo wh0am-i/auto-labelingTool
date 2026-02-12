@@ -10,6 +10,7 @@ __pycache__/
 # Logs
 *.log
 logs/
+label-studio-ml-backend/label_studio_ml/examples/yolov11-plate/debug/*
 
 # Checkpoints / models 
 *checkpoints/*

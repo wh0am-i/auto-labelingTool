@@ -217,11 +217,11 @@ class NewModel(LabelStudioMLBase):
         detected_name = (detected_name or '').lower().strip()
         
         # 1. Hardcoded mapping para garantir que placas nunca falhem
-        plate_synonyms = ['placa', 'license', 'plate', 'car_plate', 'motorcycle_plate', '0']
+        plate_synonyms = ['placa', 'license', 'plate', 'car_plate', '0']
         if any(syn in detected_name for syn in plate_synonyms):
             # Se você tiver labels diferentes para placa de moto e carro, 
-            # pode refinar aqui, mas 'car_plate' é o padrão do seu XML
-            return 'car_plate'
+            # pode refinar aqui, mas 'plate' é o padrão do seu XML
+            return 'plate'
 
         # 2. Tentativa via config JSON (para veículos: car, truck, bus...)
         classes = self.classes_config.get('classes', [])
@@ -289,7 +289,7 @@ class NewModel(LabelStudioMLBase):
             if hasattr(res_p, 'boxes') and res_p.boxes is not None:
                 for det in res_p.boxes:
                     cls_idx = int(det.cls.item())
-                    label = self._map_label_by_name(res_p.names.get(cls_idx, "")) or "car_plate"
+                    label = self._map_label_by_name(res_p.names.get(cls_idx, "")) or "plate"
                     
                     # Extração BB padrão (xyxy)
                     x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
@@ -311,7 +311,7 @@ class NewModel(LabelStudioMLBase):
                 if res_v.boxes:
                     for det in res_v.boxes:
                         label = self._map_label_by_name(res_v.names.get(int(det.cls.item()), ""))
-                        if label and not label.endswith('_plate'):
+                        if label and not label.endswith('plate'):
                             x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
                             predictions_data.append({
                                 'x': (x1 / w) * 100.0, 'y': (y1 / h) * 100.0,
@@ -334,7 +334,7 @@ class NewModel(LabelStudioMLBase):
                         if r.boxes:
                             for det in r.boxes:
                                 label = self._map_label_by_name(r.names.get(int(det.cls.item()), ""))
-                                if label and not label.endswith('_plate'):
+                                if label and not label.endswith('plate'):
                                     bx1, by1, bx2, by2 = det.xyxy.cpu().numpy().flatten().tolist()
                                     # Converte coordenada do tile para coordenada global
                                     predictions_data.append({

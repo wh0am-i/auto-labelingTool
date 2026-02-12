@@ -29,10 +29,10 @@ logger = logging.getLogger(__name__)
 
 def load_classes_config():
     candidates = [
-        os.path.expanduser('../../../../sam2_classes.json'),
-        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sam2_classes.json'),
-        os.path.join(os.path.dirname(__file__), 'sam2_classes.json'),
-        os.path.abspath(os.path.join(os.getcwd(), 'sam2_classes.json')),
+        os.path.expanduser('../../../../classes.json'),
+        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'classes.json'),
+        os.path.join(os.path.dirname(__file__), 'classes.json'),
+        os.path.abspath(os.path.join(os.getcwd(), 'classes.json')),
     ]
     for p in candidates:
         p = os.path.abspath(p)
@@ -44,7 +44,7 @@ def load_classes_config():
                 return cfg
             except Exception as e:
                 logger.warning(f"Erro ao carregar {p}: {e}")
-    logger.warning("Arquivo sam2_classes.json não encontrado. Usando fallback simples.")
+    logger.warning("Arquivo classes.json não encontrado. Usando fallback simples.")
     return {"classes": [], "filtering_rules": {"enabled": False}}
 
 
@@ -77,7 +77,7 @@ class NewModel(LabelStudioMLBase):
     """Simple YOLOv11 backend compatible with the auto-labeling CLI.
 
     Detects objects with `ultralytics.YOLO` and maps detections to classes
-    defined in `sam2_classes.json` using keyword matching and area heuristics.
+    defined in `classes.json` using keyword matching and area heuristics.
     """
 
     def __init__(self, *args, **kwargs):

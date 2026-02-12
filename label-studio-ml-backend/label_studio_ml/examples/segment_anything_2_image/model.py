@@ -112,11 +112,11 @@ RESOLVED_MODEL_CHECKPOINT = find_existing_path(*[c for c in candidates_ckpt if c
 
 # Carrega configuração de classes
 def load_classes_config():
-    """Carrega configuração de classes do arquivo sam2_classes.json"""
+    """Carrega configuração de classes do arquivo classes.json"""
     candidates = [
-        os.path.expanduser('../../../../sam2_classes.json'),
-        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sam2_classes.json'),
-        os.path.join(os.path.dirname(__file__), 'sam2_classes.json'),
+        os.path.expanduser('../../../../classes.json'),
+        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'classes.json'),
+        os.path.join(os.path.dirname(__file__), 'classes.json'),
     ]
     
     for p in candidates:
@@ -130,7 +130,7 @@ def load_classes_config():
             except Exception as e:
                 logger.warning(f"Erro ao carregar {p}: {e}")
     
-    logger.warning("Arquivo sam2_classes.json não encontrado. Usando todas as máscaras como 'segmentation'.")
+    logger.warning("Arquivo classes.json não encontrado. Usando todas as máscaras como 'segmentation'.")
     return {"classes": [], "filtering_rules": {"enabled": False}}
 
 CLASSES_CONFIG = load_classes_config()
@@ -524,13 +524,13 @@ class NewModel(LabelStudioMLBase):
             raise
 
     def _assign_label_by_size(self, area_frac):
-        """Heurística simples: escolhe classe baseada na área da máscara (mask_area / image_area) usando sam2_classes.json.
+        """Heurística simples: escolhe classe baseada na área da máscara (mask_area / image_area) usando classes.json.
         Retorna o rótulo da classe correspondente.
         """
         try:
             classes = self.classes_config.get("classes", [])
             if not classes:
-                logger.warning("Nenhuma classe configurada em sam2_classes.json. Usando 'segmentation' como padrão.")
+                logger.warning("Nenhuma classe configurada em classes.json. Usando 'segmentation' como padrão.")
                 return "segmentation"
 
             # Escolher a classe com o maior min_area_ratio <= area_frac

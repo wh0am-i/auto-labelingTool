@@ -1,1 +1,0 @@
-Utilizado modelo yolo v11 da Ultralytics treinado por Felipe Dutrain, disponível em: https://huggingface.co/felipedutrain/placa-br-yolov11

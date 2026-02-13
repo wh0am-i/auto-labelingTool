@@ -139,6 +139,17 @@ class NewModel(LabelStudioMLBase):
         if not os.path.exists(self.model_path):
             logger.error('YOLO model file not found: %s', os.path.abspath(self.model_path))
             raise FileNotFoundError(self.model_path)
+        # Guardrail: common failure is saving an HTML page (e.g. huggingface /blob URL) as .pt
+        try:
+            with open(self.model_path, 'rb') as f:
+                head = f.read(16).lstrip()
+            if head.startswith(b'<!doctype') or head.startswith(b'<html') or head.startswith(b'<?xml'):
+                raise ValueError(
+                    f"Arquivo de modelo invalido (HTML): {self.model_path}. "
+                    "Baixe novamente com download_model.py (URL /resolve/, nao /blob/)."
+                )
+        except Exception:
+            raise
         # load model and move to device if supported
         try:
             self._yolo = YOLO(self.model_path)

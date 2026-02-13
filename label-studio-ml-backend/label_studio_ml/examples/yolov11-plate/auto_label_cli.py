@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import time
+import argparse
 import requests
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,6 +27,16 @@ def check_label_studio_connection(url, max_retries=5):
     return False
 
 def main():
+    parser = argparse.ArgumentParser(description='YOLO auto-labeling CLI')
+    parser.add_argument('--model_path', help='Caminho para pesos do modelo de placa (YOLO_MODEL_PATH)')
+    parser.add_argument('--vehicle_model_path', help='Caminho para pesos do modelo de veiculos (YOLO_VEHICLE_MODEL_PATH)')
+    args = parser.parse_args()
+
+    if args.model_path:
+        os.environ['YOLO_MODEL_PATH'] = os.path.abspath(os.path.expanduser(args.model_path))
+    if args.vehicle_model_path:
+        os.environ['YOLO_VEHICLE_MODEL_PATH'] = os.path.abspath(os.path.expanduser(args.vehicle_model_path))
+
     label_studio_url = os.getenv('LABEL_STUDIO_URL')
     if not label_studio_url:
         logger.error("✗ LABEL_STUDIO_URL não configurado no ambiente. Defina LABEL_STUDIO_URL no .env")

@@ -1,5 +1,56 @@
 #!/bin/bash
 
+# ------------------------------------------------
+# Verificar Python 3.11
+# ------------------------------------------------
+echo "Verificando Python 3.11..."
+
+NEED_RESTART=0
+
+if command -v python3.11 >/dev/null 2>&1; then
+    PYTHON_BIN=python3.11
+elif command -v python3 >/dev/null 2>&1; then
+    PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    if [ "$PY_VER" = "3.11" ]; then
+        PYTHON_BIN=python3
+    else
+        echo "Python 3.11 nao encontrado. Instalando..."
+        NEED_RESTART=1
+
+        if command -v apt >/dev/null 2>&1; then
+            sudo apt update
+            sudo apt install -y python3.11 python3.11-venv
+        elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y python3.11
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S --noconfirm python
+        else
+            echo "Gerenciador de pacotes nao suportado."
+            echo "Instale manualmente o Python 3.11."
+            exit 1
+        fi
+
+        PYTHON_BIN=python3.11
+    fi
+else
+    echo "Python nao encontrado."
+    exit 1
+fi
+
+# Se instalou agora, pedir reinicio do terminal
+if [ "$NEED_RESTART" = "1" ]; then
+    echo
+    echo "========================================"
+    echo "Python 3.11 foi instalado com sucesso."
+    echo
+    echo "Reinicie o terminal e"
+    echo "execute o setup.sh outra vez"
+    echo "========================================"
+    exit 0
+fi
+
+echo "Usando $PYTHON_BIN"
+
 echo "Iniciando setup do ambiente Label Studio" 
 
 # Instalar dependências do sistema

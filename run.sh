@@ -13,7 +13,7 @@ load_env() {
 
 # Função para limpar memória (variáveis da sessão)
 reset_memory() {
-    unset DEVICE LABEL_STUDIO_URL LABEL_STUDIO_ML_BACKEND_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND MODEL_DIR DEBUG_DUMP
+    unset DEVICE LABEL_STUDIO_URL LABEL_STUDIO_ML_BACKEND_URL PERSONAL_TOKEN LEGACY_TOKEN MODEL_CHECKPOINT MODEL_CONFIG YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH SELECTED_BACKEND MODEL_DIR
 }
 
 init_config() {
@@ -84,7 +84,7 @@ start_servers() {
     echo
     echo "[1] Iniciar Tudo (Frontend + Backend)"
     echo "[2] Apenas Frontend (Label Studio)"
-    echo "[3] Apenas Backend ($SELECTED_BACKEND)"
+    echo "[3] Apenas Backend (Label Studio ML)"
     read -p "Escolha uma opcao: " OP_START
 
     # [cite_start]Define a pasta do backend [cite: 25]
@@ -109,10 +109,14 @@ start_servers() {
         export LABEL_STUDIO_API_KEY=$PERSONAL_TOKEN
         label-studio-ml start . &
         popd > /dev/null
+        echo "Servidores iniciados." 
+        echo "Servidores configurados para: $LABEL_STUDIO_URL e $LABEL_STUDIO_ML_BACKEND_URL"
     fi
 
     if [ "$OP_START" = "2" ]; then
         label-studio &
+        echo "Servidor iniciado." 
+        echo "Servidor configurado para: $LABEL_STUDIO_URL"
     fi
 
     if [ "$OP_START" = "3" ]; then
@@ -122,9 +126,10 @@ start_servers() {
         export LABEL_STUDIO_API_KEY=$PERSONAL_TOKEN
         label-studio-ml start . &
         popd > /dev/null
+        echo "Servidor iniciado." 
+        echo "Servidor configurado para: $LABEL_STUDIO_ML_BACKEND_URL"
     fi
     
-    echo "Servidores disparados."
     sleep 2
 }
 
@@ -187,7 +192,7 @@ while true; do
     echo "CONFIG ATUAL  : $DEVICE"
     echo "CONFIG FRONTEND: $LABEL_STUDIO_URL"
     echo "CONFIG BACKEND : $LABEL_STUDIO_ML_BACKEND_URL"
-    echo "BACKEND PADRAO : $SELECTED_BACKEND"
+    echo "MODEL PADRAO : $SELECTED_BACKEND"
     echo "========================================"
     echo "1. Iniciar servidores"
     echo "2. Auto-labeling interativo"
@@ -195,7 +200,7 @@ while true; do
     echo "4. Resetar configuracoes (.env)"
     echo "5. Sair"
     echo "========================================"
-    read -p "Escolha uma opcao (1-5): " choice
+    read -p "Escolha uma opcao: " choice
 
     case $choice in
         1) start_servers ;;

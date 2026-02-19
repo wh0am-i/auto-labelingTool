@@ -4,6 +4,8 @@ Backward-compatible YOLOv11 backend for vehicle detection (yolo11x).
 This module provides a `NewModel` that uses a yolo11x checkpoint by
 default (examples/yolov11/models/yolo11x.pt) and maps detections to
 classes defined in `classes.json` (vehicles, trucks, buses, etc.).
+
+Only for standalone use.
 """
 
 def load_classes_config():

@@ -83,7 +83,7 @@ if errorlevel 1 (
 :: 4. Instalar dependencias
 echo Instalando dependencias...
 
-"%PYTHON_EXE%" -m pip install label-studio label-studio-ml label-studio-sdk numpy opencv-python Pillow requests torch torchvision hydra-core omegaconf python-dotenv tqdm ultralytics
+"%PYTHON_EXE%" -m pip install tensorrt openvino label-studio label-studio-ml label-studio-sdk numpy opencv-python Pillow requests torch torchvision hydra-core omegaconf python-dotenv tqdm ultralytics
 
 if errorlevel 1 (
     echo.

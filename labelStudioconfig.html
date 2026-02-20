@@ -1,3 +1,4 @@
+<!-- Imagens -->
 <View>
   <Image name="image" value="$image" zoom="true"/>
   <RectangleLabels name="label" toName="image" rotation="true">
@@ -8,3 +9,22 @@
     <Label value="motorcycle"/>
   </RectangleLabels>
 </View>
+
+<!-- Video -->
+<View>
+   <Labels name="videoLabels" toName="video" zoom="true">
+    <Label value="car"/>
+    <Label value="plate"/>
+    <Label value="truck"/>
+    <Label value="bus"/>
+    <Label value="motorcycle"/>
+   </Labels>
+   
+   <!-- Please specify FPS carefully, it will be used for all project videos -->
+   <Video name="video" value="$video" framerate="3.0"/>
+   <VideoRectangle name="label" toName="video" />
+</View>
+
+<!--{
+ "video": "/static/samples/opossum_snow.mp4"
+}-->

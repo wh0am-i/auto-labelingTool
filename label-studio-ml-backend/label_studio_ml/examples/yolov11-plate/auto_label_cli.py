@@ -101,8 +101,8 @@ def main():
     if unlabeled_count == 0:
         logger.info(f"Nenhuma tarefa não etiquetada no projeto {selected_project.title}")
         sys.exit(0)
-    print(f"Encontradas {unlabeled_count} imagens não etiquetadas.")
-    confirm = input(f"\nDeseja iniciar o auto-labeling de {unlabeled_count} imagens? (S/n): ").strip().lower()
+    print(f"Encontradas {unlabeled_count} tarefas não etiquetadas.")
+    confirm = input(f"\nDeseja iniciar o auto-labeling de {unlabeled_count} tarefas? (S/n): ").strip().lower()
     if confirm == 'n':
         logger.info("Auto-labeling cancelado pelo usuário")
         sys.exit(0)

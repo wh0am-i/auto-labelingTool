@@ -72,7 +72,7 @@ python3 -m pip install --upgrade pip
 # Instalar dependências base (PyPI)
 # Usamos 'python3 -m pip' para garantir que o binário do venv seja o destino
 echo "Verificando dependências base..." 
-python3 -m pip install label-studio label-studio-ml label-studio-sdk \
+python3 -m pip install tensorrt openvino label-studio label-studio-ml label-studio-sdk \
             numpy opencv-python Pillow requests \
             torch torchvision hydra-core omegaconf \
             python-dotenv tqdm ultralytics 

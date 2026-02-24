@@ -591,9 +591,12 @@ class NewModel(LabelStudioMLBase):
 
                 for it in pred['items']:
                     frame_items.append({
+                        'id': str(uuid4()),
                         'label': it.get('label', 'object'),
                         'score': float(it.get('score', 0.0)),
-                        'frame': int(frame_idx),
+                        'frame': frame_idx,
+                        'frame_start': frame_idx,
+                        'frame_end': frame_idx,
                         'time': float(time_sec),
                         'x': float(it.get('x', 0)),
                         'y': float(it.get('y', 0)),

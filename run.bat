@@ -6,7 +6,7 @@ set "PYTHON=%~dp0labelStudioVenv\Scripts\python.exe"
 :: --- LIMPEZA DE MEMÓRIA ---
 set "LABEL_STUDIO_URL=" & set "PERSONAL_TOKEN=" & set "YOLO_ENABLE_OPENVINO=" & set "YOLO_FORCE_OPENVINO=" & set "LEGACY_TOKEN=" & set "MODEL_CHECKPOINT=" & set "MODEL_CONFIG=" & set "YOLO_PLATE_MODEL_PATH=" & set "YOLO_VEHICLE_MODEL_PATH=" & set "SELECTED_BACKEND=" & set "MODEL_DIR="
 
-set "ENV_FILE=.env"
+set "ENV_FILE=2.env"
 
 :init_config
 if not exist "%ENV_FILE%" type nul > "%ENV_FILE%"
@@ -221,7 +221,7 @@ goto menu
 if "!YOLO_ENABLE_OPENVINO!"=="" (
     :ask_openvino
     echo.
-    set /p "IN_OV=[CONFIGURACAO] Deseja ativar execucao com openVINO? [S/n] (Enter para SIM): "
+    set /p "IN_OV=[CONFIGURACAO] Deseja ativar execucao com openVINO? [S/n]: "
     
     if "!IN_OV!"=="" (
         set "YOLO_ENABLE_OPENVINO=1"

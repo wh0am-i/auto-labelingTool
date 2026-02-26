@@ -1,16 +1,20 @@
-import cv2
 import os
 import tempfile
 import requests
+import numpy as np
 from uuid import uuid4
-import requests
 from PIL import Image
+
+try:
+    import cv2
+except Exception:
+    cv2 = None
+
 from image import ImageProcessor
 
 
 class VideoProcessor:
-
-    def __init__(self):
+    def __init__(self, image_processor):
         self.image = ImageProcessor()
 
     def _predict_video(self, video_url):
@@ -42,25 +46,32 @@ class VideoProcessor:
             src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
             if src_fps <= 0:
                 src_fps = float(os.getenv("YOLO_VIDEO_SRC_FPS_FALLBACK", 30.0))
+            total_frames_meta = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             frame_stride = int(os.getenv("YOLO_VIDEO_FRAME_STRIDE", 1))
             if frame_stride < 1:
                 frame_stride = 1
+            # Label Studio generally expects frame indexes starting at 0.
+            frame_base = int(os.getenv("YOLO_VIDEO_FRAME_BASE", 0))
+            if frame_base not in (0, 1):
+                frame_base = 0
 
-            frame_idx = 0
+            frame_idx = -1
             while True:
                 ok, frame = cap.read()
                 if not ok:
                     break
                 frame_idx += 1
-                if (frame_idx - 1) % frame_stride != 0:
+                if frame_idx % frame_stride != 0:
                     continue
 
-                h, w = frame.shape[:2]
-                frames_count = max(frames_count, frame_idx)
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(rgb)
                 pred = self.image._predict_pil_image(pil_img)
-                time_sec = (frame_idx - 1) / src_fps
+                ts_msec = cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0
+                time_sec = (
+                    float(ts_msec / 1000.0) if ts_msec > 0 else (frame_idx / src_fps)
+                )
+                ls_frame_idx = frame_idx + frame_base
                 duration = max(duration, time_sec)
 
                 for it in pred["items"]:
@@ -69,19 +80,29 @@ class VideoProcessor:
                             "id": str(uuid4()),
                             "label": it.get("label", "object"),
                             "score": float(it.get("score", 0.0)),
-                            "frame": frame_idx,
-                            "frame_start": frame_idx,
-                            "frame_end": frame_idx,
+                            "frame": ls_frame_idx,
+                            "frame_start": ls_frame_idx,
+                            "frame_end": ls_frame_idx,
                             "time": float(time_sec),
                             "x": float(it.get("x", 0)),
                             "y": float(it.get("y", 0)),
                             "width": float(it.get("width", 0)),
                             "height": float(it.get("height", 0)),
                             "rotation": float(it.get("rotation", 0)),
-                            "enabled": True,
+                            # Each detection is frame-local. If enabled=True without a closing
+                            # keyframe, Label Studio can extend the box lifespan and visually
+                            # "repeat" old boxes in following frames.
+                            "enabled": False,
                         }
                     )
 
+            # Keep full video metadata independent from stride, to avoid timeline drift.
+            if total_frames_meta > 0:
+                frames_count = total_frames_meta
+                duration = max(duration, float(total_frames_meta / src_fps))
+            else:
+                frames_count = max(1, frame_idx + 1)
+                duration = max(duration, float(frames_count / src_fps))
             cap.release()
         finally:
             try:
@@ -113,7 +134,7 @@ class VideoProcessor:
                         "labels": [item.get("label", "object")],
                         "sequence": [
                             {
-                                "frame": int(item.get("frame", 1)),
+                                "frame": int(item.get("frame", 0)),
                                 "time": float(item.get("time", 0.0)),
                                 "x": float(item.get("x", 0.0)),
                                 "y": float(item.get("y", 0.0)),

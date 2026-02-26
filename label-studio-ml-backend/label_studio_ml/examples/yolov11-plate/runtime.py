@@ -15,7 +15,7 @@ class Runtime:
             "yes",
         )
         # OpenVINO can change recall/precision compared to PT.
-        # Enable explicitly with YOLO_ENABLE_OPENVINO=1 or YOLO_FORCE_OPENVINO=1.
+        # Enable explicitly with YOLO_ENABLE_OPENVINO=1 or YOLO_FORCE_OPENVINO=1(force allways openvino).
         enable_openvino = str(
             os.getenv("YOLO_ENABLE_OPENVINO", "0")
         ).strip().lower() in ("1", "true", "yes")
@@ -39,3 +39,10 @@ class Runtime:
             "yes",
         ) and str(self.device).startswith("cuda")
         return self.device
+
+    def _sync_runtime(self):
+        self._resolve_runtime_device()
+        self.device = getattr(self, "device", self.device)
+        self.runtime_backend = getattr(self, "runtime_backend", self.runtime_backend)
+        self.ov_device = getattr(self, "ov_device", self.ov_device)
+        self._use_half = getattr(self, "_use_half", self._use_half)

@@ -8,7 +8,7 @@ ENV_FILE="2.env"
 PYTHON="./labelStudioVenv/bin/python"
 
 # --- LIMPEZA DE MEMORIA DA SESSAO ---
-unset LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN YOLO_ENABLE_OPENVINO YOLO_FORCE_OPENVINO YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH
+unset LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN YOLO_ENABLE_OPENVINO YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH
 
 trim() {
     local s="$1"
@@ -86,18 +86,15 @@ verify_yolo_models() {
             read -r -p "[CONFIGURACAO] Deseja ativar execucao com openVINO? [S/n]: " IN_OV
             if [ -z "$IN_OV" ] || [[ "$IN_OV" =~ ^[Ss]$ ]]; then
                 YOLO_ENABLE_OPENVINO=1
-                YOLO_FORCE_OPENVINO=1
                 break
             elif [[ "$IN_OV" =~ ^[Nn]$ ]]; then
                 YOLO_ENABLE_OPENVINO=0
-                YOLO_FORCE_OPENVINO=0
                 break
             else
                 echo "[AVISO] Opcao invalida."
             fi
         done
         echo "YOLO_ENABLE_OPENVINO=$YOLO_ENABLE_OPENVINO" >> "$ENV_FILE"
-        echo "YOLO_FORCE_OPENVINO=$YOLO_FORCE_OPENVINO" >> "$ENV_FILE"
     fi
 
     echo
@@ -202,7 +199,7 @@ stop_servers() {
 reset_env() {
     echo "Apagando configuracoes e limpando memoria..."
     [ -f "$ENV_FILE" ] && rm -f "$ENV_FILE"
-    unset LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN YOLO_ENABLE_OPENVINO YOLO_FORCE_OPENVINO YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH
+    unset LABEL_STUDIO_URL PERSONAL_TOKEN LEGACY_TOKEN YOLO_ENABLE_OPENVINO YOLO_PLATE_MODEL_PATH YOLO_VEHICLE_MODEL_PATH
     init_config
 }
 

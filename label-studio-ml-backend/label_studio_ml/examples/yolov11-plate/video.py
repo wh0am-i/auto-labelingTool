@@ -15,7 +15,7 @@ from image import ImageProcessor
 
 class VideoProcessor:
     def __init__(self, image_processor):
-        self.image = ImageProcessor()
+        self.image = image_processor
 
     def _predict_video(self, video_url):
         if cv2 is None:

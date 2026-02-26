@@ -3,6 +3,7 @@ import os
 
 class Utils:
 
+    @staticmethod
     def get_absolute_url(url):
         if not url:
             return url

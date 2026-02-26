@@ -50,7 +50,7 @@ def load_classes_config():
     return {"classes": [], "filtering_rules": {"enabled": False}}
 
 
-class NewModel(LabelStudioMLBase):
+class NewModel(LabelStudioMLBase, Loader):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -76,10 +76,11 @@ class NewModel(LabelStudioMLBase):
         self.ov_device = "AUTO"
         self._plate_model_repair_attempted = False
         self._plate_model_load_failed = False
+        Loader.__init__(self)
         self.runtime = Runtime()
+        self.loader = self
         self.image_processor = ImageProcessor(self)
         self.video_processor = VideoProcessor(self.image_processor)
-        self.loader = Loader()
         self.utils = Utils()
         # Resolve YOLO model path: prefer absolute/expanded env var, else package-local models/best.pt
         env_path = os.getenv("YOLO_MODEL_PATH")

@@ -5,8 +5,6 @@ from uuid import uuid4
 
 import requests
 from PIL import Image
-from loader import Loader
-from model import NewModel
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +12,6 @@ logger = logging.getLogger(__name__)
 class ImageProcessor:
     def __init__(self, model):
         self.model = model
-        self.loader = Loader
-        self.model = NewModel()
 
     def _predict_image(self, image_url):
         img = self.load_image_from_url(image_url)
@@ -50,7 +46,7 @@ class ImageProcessor:
                     )
 
         try:
-            v_yolo = self.loader._load_vehicle_yolo()
+            v_yolo = self.model._load_vehicle_yolo()
             conf_v = float(os.getenv("YOLO_VEH_CONF", 0.25))
             global_vehicle_count = 0
             res_v_list = self.model._safe_model_predict(

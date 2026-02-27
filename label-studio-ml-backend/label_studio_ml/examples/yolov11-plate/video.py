@@ -82,7 +82,7 @@ class VideoProcessor:
                             "score": float(it.get("score", 0.0)),
                             "frame": ls_frame_idx,
                             "frame_start": ls_frame_idx,
-                            "frame_end": ls_frame_idx,
+                            "frame_end": ls_frame_idx + frame_stride,
                             "time": float(time_sec),
                             "x": float(it.get("x", 0)),
                             "y": float(it.get("y", 0)),

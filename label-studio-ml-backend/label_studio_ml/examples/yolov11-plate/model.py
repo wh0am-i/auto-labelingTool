@@ -228,7 +228,7 @@ class NewModel(LabelStudioMLBase, Loader):
         To avoid long pauses on first prediction, the model is loaded here.
         You can set env YOLO_LOAD_IN_BACKGROUND=1 to load in background thread.
         """
-        # determine device
+        # determine device - Configure runtime based on device capability
         self._sync_runtime()
         ram_gb = self._get_total_ram_gb()
         low_mem = self._is_low_memory_mode()

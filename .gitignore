@@ -45,3 +45,4 @@ config.json
 *.jpeg
 *.pt
 *.onnx
+*.mp4

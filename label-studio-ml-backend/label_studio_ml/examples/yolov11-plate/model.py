@@ -314,11 +314,14 @@ class NewModel(LabelStudioMLBase, Loader):
         return "CPU+PyTorch"
 
     def _submit_predictions(self, task_id, predictions, project_id):
+        # Garante que há cliente conectado ao Label Studio
         if not self.client:
             logger.error("Cliente Label Studio não está disponível")
-            return
+            return False
         try:
+            # Recupera projeto para criar prediction via API legada
             project = self.client.get_project(project_id)
+            # Cria prediction na task alvo
             project.create_prediction(
                 task_id=task_id,
                 result=predictions[0]["result"],
@@ -326,8 +329,35 @@ class NewModel(LabelStudioMLBase, Loader):
                 score=predictions[0].get("score", 0),
             )
             logger.info("Predições submetidas para a tarefa %s", task_id)
+            # Retorna sucesso para controle transacional do fluxo
+            return True
         except Exception as e:
             logger.error("Erro ao submeter predições: %s", e)
+            # Retorna falha para interromper remoção da task original
+            return False
+
+    def _import_converted_video_as_task(self, project_id, video_path):
+        # Obtém projeto para importar arquivo convertido como nova task
+        project = self.client.get_project(project_id)
+        # Importa arquivo binário (upload) e recebe IDs das tasks criadas
+        new_task_ids = project.import_tasks(video_path)
+        if not new_task_ids:
+            raise RuntimeError("Falha ao importar vídeo convertido como nova task.")
+        # Seleciona a primeira task criada no upload
+        new_task_id = int(new_task_ids[0])
+        logger.info("Vídeo CFR importado em nova task: %s", new_task_id)
+        return new_task_id
+
+    def _cleanup_local_file(self, file_path):
+        # Evita tentativa de remoção quando não há arquivo
+        if not file_path:
+            return
+        try:
+            # Remove arquivo temporário local
+            os.remove(file_path)
+        except Exception:
+            # Ignora erro de limpeza para não interromper pipeline
+            pass
 
     def auto_label_project(self, project_id):
         logger.info("Iniciando auto-labeling do projeto %s (YOLOv11)", project_id)
@@ -342,21 +372,63 @@ class NewModel(LabelStudioMLBase, Loader):
         error_count = 0
 
         for t in tasks:
+            # Inicializa variáveis do bloco para uso seguro no finally
+            media_type = None
+            converted_video_local_path = None
             try:
+                # Resolve mídia da tarefa (imagem ou vídeo)
                 data = t.get("data") or {}
                 media_type, media_url = self.utils._resolve_task_media(data)
+                # Task original de entrada
+                source_task_id = int(t.get("id"))
+                # Por padrão, prediction vai para a própria task
+                target_task_id = source_task_id
                 if media_type == "video":
+                    # Executa inferência de vídeo e possível normalização CFR
                     pred = self.video_processor._predict_video(media_url)
+                    # Caminho local do vídeo convertido (se houver)
+                    converted_video_local_path = pred.get("processed_video_path")
+                    # Gera payload de resultados para o Label Studio
                     predictions = self.video_processor._generate_video_results(pred)
+                    if pred.get("converted_to_cfr") and converted_video_local_path:
+                        # Se converteu, cria nova task com o vídeo CFR
+                        target_task_id = self._import_converted_video_as_task(
+                            project_id, converted_video_local_path
+                        )
                 else:
+                    # Fluxo padrão para imagem
                     pred = self.image_processor._predict_image(media_url)
                     predictions = self.image_processor._generate_results(pred["items"])
 
-                self._submit_predictions(t.get("id"), predictions, project_id)
+                # Submete predições na task alvo (original ou nova)
+                ok = self._submit_predictions(target_task_id, predictions, project_id)
+                if not ok:
+                    raise RuntimeError(
+                        f"Falha ao submeter predição para task {target_task_id}"
+                    )
+
+                if (
+                    media_type == "video"
+                    and target_task_id != source_task_id
+                    and str(os.getenv("YOLO_VIDEO_DELETE_ORIGINAL_TASK", "1")).lower()
+                    in ("1", "true", "yes")
+                ):
+                    # Remove task antiga somente após sucesso completo da nova task
+                    project.delete_task(source_task_id)
+                    logger.info(
+                        "Task original %s removida após conversão para CFR (nova task %s).",
+                        source_task_id,
+                        target_task_id,
+                    )
+
                 success_count += 1
             except Exception as e:
                 logger.error("Erro ao processar tarefa %s: %s", t.get("id"), e)
                 error_count += 1
+            finally:
+                if media_type == "video":
+                    # Limpa arquivo temporário de vídeo convertido (se existir)
+                    self._cleanup_local_file(converted_video_local_path)
 
         logger.info(
             "Resumo auto-labeling projeto %s: sucesso=%s erro=%s total=%s",
@@ -375,8 +447,11 @@ class NewModel(LabelStudioMLBase, Loader):
                 data = task.get("data") or {}
                 media_type, media_url = self.utils._resolve_task_media(data)
                 if media_type == "video":
+                    # Predição de vídeo para endpoint síncrono /predict
                     pred_data = self.video_processor._predict_video(media_url)
                     results = self.video_processor._generate_video_results(pred_data)
+                    # Limpeza do arquivo convertido local (não reaproveitado no /predict)
+                    self._cleanup_local_file(pred_data.get("processed_video_path"))
                 else:
                     pred_data = self.image_processor._predict_image(media_url)
                     results = self.image_processor._generate_results(pred_data["items"])

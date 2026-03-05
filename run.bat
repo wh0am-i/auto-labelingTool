@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 set "PYTHON=%~dp0labelStudioVenv\Scripts\python.exe"
-set "ENV_FILE=2.env"
+set "ENV_FILE=.env"
 
 :: --- LIMPEZA DE MEMORIA DA SESSAO ---
 set "LABEL_STUDIO_URL="
@@ -16,7 +16,7 @@ set "YOLO_VEHICLE_MODEL_PATH="
 :init_config
 if not exist "%ENV_FILE%" type nul > "%ENV_FILE%"
 
-:: Carrega variaveis do arquivo .env/.2.env
+:: Carrega variaveis do arquivo .env/
 for /f "usebackq tokens=*" %%i in ("%ENV_FILE%") do (
     set "line=%%i"
     if "!line:~0,1!" neq "#" if not "!line!"=="" (

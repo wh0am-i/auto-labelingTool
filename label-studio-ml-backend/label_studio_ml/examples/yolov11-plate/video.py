@@ -58,7 +58,11 @@ class VideoProcessor:
             "20",  # Qualidade visual alta com tamanho razoável
             "-movflags",  # Flags do container MP4
             "+faststart",  # Move moov atom para início (melhor streaming)
-            "-an",  # Remove áudio para simplificar pipeline de autolabel
+            "-an",  # Remove áudio para simplificar pipeline de autolabel"-profile:v", "baseline",  # Compatibilidade com o browser
+            "-level",
+            "3.0",
+            "-x264-params",
+            "bframes=0",
             output_path,  # Caminho do vídeo de saída
         ]
         # Executa conversão e levanta erro em caso de falha
@@ -138,7 +142,9 @@ class VideoProcessor:
 
             if abs(src_fps - target_fps) > fps_tolerance:
                 cap.release()
-                normalized_video_path = self._convert_to_cfr(temp_video_path, target_fps)
+                normalized_video_path = self._convert_to_cfr(
+                    temp_video_path, target_fps
+                )
                 video_path_for_infer = normalized_video_path
                 converted_to_cfr = True
                 cap = cv2.VideoCapture(video_path_for_infer)
@@ -198,7 +204,9 @@ class VideoProcessor:
 
                 # Ajusta índice conforme base configurada
                 ls_frame_idx = frame_idx + frame_base
-                print(f"Frame idx: {frame_idx}; time_sec: {time_sec}; src_fps: {src_fps}")
+                print(
+                    f"Frame idx: {frame_idx}; time_sec: {time_sec}; src_fps: {src_fps}"
+                )
                 # Para cada detecção encontrada no frame
                 for it in pred["items"]:
                     frame_items.append(

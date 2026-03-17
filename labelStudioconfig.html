@@ -20,8 +20,8 @@
     <Label value="motorcycle"/>
    </Labels>
    
-   <!-- Please specify FPS carefully, it will be used for all project videos -->
-   <Video name="video" value="$video" framerate="3.0"/>
+   <!-- Nao fixe framerate aqui: deixe o player usar o metadata do proprio video -->
+   <Video name="video" value="$video"/>
    <VideoRectangle name="label" toName="video" />
 </View>
 

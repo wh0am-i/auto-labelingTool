@@ -1,9 +1,6 @@
 import os
 import logging
-from io import BytesIO
 from uuid import uuid4
-
-import requests
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -11,12 +8,10 @@ logger = logging.getLogger(__name__)
 
 class ImageProcessor:
     def __init__(self, model):
-        # Recebe instância do modelo YOLO
         self.model = model
 
     @staticmethod
     def _plate_center_inside_any_vehicle(plate_xyxy, vehicle_boxes):
-        # Verifica se o centro da placa está dentro de algum bounding box de veículo
         x1, y1, x2, y2 = plate_xyxy
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
@@ -25,189 +20,203 @@ class ImageProcessor:
                 return True
         return False
 
-    def _predict_image(self, image_url):
-        # Faz download da imagem e executa predição
-        img = self.load_image_from_url(image_url)
-        return self._predict_pil_image(img)
-
     def _predict_pil_image(self, img):
-        # Executa inferência YOLO em imagem PIL
         w, h = img.size
-        predictions_data = []
-        plate_candidates = []
-        vehicle_boxes = []
 
-        plate_conf_inside_vehicle = float(os.getenv("YOLO_PLATE_CONF_IN_VEHICLE", 0.19))
-        plate_conf_outside_vehicle = float(
-            os.getenv("YOLO_PLATE_CONF_OUTSIDE_VEHICLE", 0.40)
+        # Detecções
+        plate_candidates = self._detect_plates(img)
+        vehicle_results = self._detect_vehicles_with_tiling(img)
+
+        # Filtro de proximidade
+        filtered_plates = self._filter_plates(
+            plate_candidates, vehicle_results["boxes"], w, h
         )
 
-        # Modelo YOLO para placas
+        all_items = vehicle_results["predictions"] + filtered_plates
+
+        # LIMPEZA FINAL: Aplica NMS em tudo para remover sobreposições do Tiling
+        cleaned_items = self._apply_nms(all_items)
+
+        return {
+            "items": cleaned_items,
+            "width": w,
+            "height": h,
+        }
+
+    def _detect_plates(self, img):
         yolo_plate = self.model._load_yolo()
-        conf_p = float(os.getenv("YOLO_CONF", 0.19))
-        res_p_list = self.model._safe_model_predict(
+        conf_p = float(os.getenv("YOLO_CONF", 0.08))
+        res_list = self.model._safe_model_predict(
             yolo_plate, img, conf=conf_p, verbose=False
         )
 
-        # Coleta candidatos de placas
-        for res_p in res_p_list:
-            if hasattr(res_p, "boxes") and res_p.boxes is not None:
-                for det in res_p.boxes:
-                    x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
-                    plate_candidates.append(((x1, y1, x2, y2), float(det.conf.item())))
-
-        try:
-            # Modelo YOLO para veículos
-            v_yolo = self.model._load_vehicle_yolo()
-            conf_v = float(os.getenv("YOLO_VEH_CONF", 0.25))
-
-            global_vehicle_count = 0
-
-            res_v_list = self.model._safe_model_predict(
-                v_yolo, img, conf=conf_v, verbose=False
-            )
-
-            # Detecção de veículos
-            for res_v in res_v_list:
-                if res_v.boxes:
-                    for det in res_v.boxes:
-                        label = self.model._map_label_by_name(
-                            res_v.names.get(int(det.cls.item()), "")
+        candidates = []
+        for res in res_list:
+            if hasattr(res, "boxes"):
+                for det in res.boxes:
+                    candidates.append(
+                        (
+                            det.xyxy.cpu().numpy().flatten().tolist(),
+                            float(det.conf.item()),
                         )
-
-                        if label and not label.endswith("plate"):
-                            x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
-
-                            vehicle_boxes.append((x1, y1, x2, y2))
-
-                            predictions_data.append(
-                                {
-                                    "x": (x1 / w) * 100.0,
-                                    "y": (y1 / h) * 100.0,
-                                    "width": ((x2 - x1) / w) * 100.0,
-                                    "height": ((y2 - y1) / h) * 100.0,
-                                    "rotation": 0.0,
-                                    "score": float(det.conf.item()),
-                                    "label": label,
-                                    "orig_w": w,
-                                    "orig_h": h,
-                                }
-                            )
-
-                            global_vehicle_count += 1
-
-            # Estratégia de tiling para imagens com poucos veículos detectados
-            tile_if_global_max = int(os.getenv("YOLO_TILE_IF_GLOBAL_MAX", 0))
-
-            if global_vehicle_count <= tile_if_global_max and len(
-                predictions_data
-            ) < int(os.getenv("YOLO_TILE_TRIGGER", 5)):
-
-                tiles = [
-                    (0, 0, w // 2, h // 2),
-                    (w // 2, 0, w, h // 2),
-                    (0, h // 2, w // 2, h),
-                    (w // 2, h // 2, w, h),
-                ]
-
-                tile_conf = float(os.getenv("YOLO_TILE_CONF", conf_v + 0.1))
-
-                for tx1, ty1, tx2, ty2 in tiles:
-                    tile_img = img.crop((tx1, ty1, tx2, ty2))
-
-                    tile_res = self.model._safe_model_predict(
-                        v_yolo, tile_img, conf=tile_conf, verbose=False
                     )
+        return candidates
 
-                    for r in tile_res:
-                        if r.boxes:
-                            for det in r.boxes:
-                                label = self.model._map_label_by_name(
-                                    r.names.get(int(det.cls.item()), "")
+    def _detect_vehicles_with_tiling(self, img):
+        w, h = img.size
+        v_yolo = self.model._load_vehicle_yolo()
+        conf_v = float(os.getenv("YOLO_VEH_CONF", 0.10))
+
+        predictions_data = []
+        vehicle_boxes = []
+        global_vehicle_count = 0
+
+        # Detecção Normal
+        res_v_list = self.model._safe_model_predict(
+            v_yolo, img, conf=conf_v, verbose=False
+        )
+        for res_v in res_v_list:
+            if res_v.boxes:
+                for det in res_v.boxes:
+                    label = self.model._map_label_by_name(
+                        res_v.names.get(int(det.cls.item()), "")
+                    )
+                    if label and not label.endswith("plate"):
+                        x1, y1, x2, y2 = det.xyxy.cpu().numpy().flatten().tolist()
+                        vehicle_boxes.append((x1, y1, x2, y2))
+                        predictions_data.append(
+                            self._format_item(
+                                x1, y1, x2, y2, w, h, label, float(det.conf.item())
+                            )
+                        )
+                        global_vehicle_count += 1
+
+        # Estratégia de Tiling
+        tile_if_global_max = int(os.getenv("YOLO_TILE_IF_GLOBAL_MAX", 30))
+        tile_trigger = int(os.getenv("YOLO_TILE_TRIGGER", 10))
+
+        if (
+            global_vehicle_count <= tile_if_global_max
+            and len(predictions_data) < tile_trigger
+        ):
+            tiles = [
+                (0, 0, w // 2, h // 2),
+                (w // 2, 0, w, h // 2),
+                (0, h // 2, w // 2, h),
+                (w // 2, h // 2, w, h),
+            ]
+            tile_conf = float(os.getenv("YOLO_TILE_CONF", conf_v + 0.1))
+
+            for tx1, ty1, tx2, ty2 in tiles:
+                tile_img = img.crop((tx1, ty1, tx2, ty2))
+                tile_res = self.model._safe_model_predict(
+                    v_yolo, tile_img, conf=tile_conf, verbose=False
+                )
+                for r in tile_res:
+                    if r.boxes:
+                        for det in r.boxes:
+                            label = self.model._map_label_by_name(
+                                r.names.get(int(det.cls.item()), "")
+                            )
+                            if label and not label.endswith("plate"):
+                                bx1, by1, bx2, by2 = (
+                                    det.xyxy.cpu().numpy().flatten().tolist()
+                                )
+                                real_x1, real_y1 = bx1 + tx1, by1 + ty1
+                                real_x2, real_y2 = bx2 + tx1, by2 + ty1
+                                vehicle_boxes.append(
+                                    (real_x1, real_y1, real_x2, real_y2)
+                                )
+                                predictions_data.append(
+                                    self._format_item(
+                                        real_x1,
+                                        real_y1,
+                                        real_x2,
+                                        real_y2,
+                                        w,
+                                        h,
+                                        label,
+                                        float(det.conf.item()),
+                                    )
                                 )
 
-                                if label and not label.endswith("plate"):
-                                    bx1, by1, bx2, by2 = (
-                                        det.xyxy.cpu().numpy().flatten().tolist()
-                                    )
+        return {"predictions": predictions_data, "boxes": vehicle_boxes}
 
-                                    vehicle_boxes.append(
-                                        (bx1 + tx1, by1 + ty1, bx2 + tx1, by2 + ty1)
-                                    )
+    def _format_item(self, x1, y1, x2, y2, w, h, label, score):
+        return {
+            "x": (x1 / w) * 100.0,
+            "y": (y1 / h) * 100.0,
+            "width": ((x2 - x1) / w) * 100.0,
+            "height": ((y2 - y1) / h) * 100.0,
+            "rotation": 0.0,
+            "score": score,
+            "label": label,
+            "orig_w": w,
+            "orig_h": h,
+        }
 
-                                    predictions_data.append(
-                                        {
-                                            "x": ((bx1 + tx1) / w) * 100.0,
-                                            "y": ((by1 + ty1) / h) * 100.0,
-                                            "width": ((bx2 - bx1) / w) * 100.0,
-                                            "height": ((by2 - by1) / h) * 100.0,
-                                            "rotation": 0.0,
-                                            "score": float(det.conf.item()),
-                                            "label": label,
-                                            "orig_w": w,
-                                            "orig_h": h,
-                                        }
-                                    )
+    def _apply_nms(self, items, iou_threshold=0.25):
+        """Unificado: Remove detecções sobrepostas baseadas em IoU."""
+        if not items:
+            return []
 
-        except Exception as e:
-            logger.error("Erro veiculos: %s", e)
-            raise
+        # Ordena por score descendente
+        sorted_items = sorted(items, key=lambda x: x["score"], reverse=True)
+        keep = []
 
-        # Filtra placas conforme posição relativa aos veículos
-        for plate_xyxy, plate_score in plate_candidates:
+        while sorted_items:
+            best = sorted_items.pop(0)
+            keep.append(best)
 
-            is_inside_vehicle = self._plate_center_inside_any_vehicle(
-                plate_xyxy, vehicle_boxes
-            )
+            remaining = []
+            for item in sorted_items:
+                # Se forem da mesma classe e sobrepuserem muito, descarta o pior
+                if (
+                    item["label"] == best["label"]
+                    and self._calculate_iou(best, item) > iou_threshold
+                ):
+                    continue
+                remaining.append(item)
+            sorted_items = remaining
 
-            required_conf = (
-                plate_conf_inside_vehicle
-                if is_inside_vehicle
-                else plate_conf_outside_vehicle
-            )
+        return keep
 
-            if plate_score < required_conf:
-                continue
+    def _calculate_iou(self, box1, box2):
+        """Calcula IoU usando as porcentagens do Label Studio."""
+        x1 = max(box1["x"], box2["x"])
+        y1 = max(box1["y"], box2["y"])
+        x2 = min(box1["x"] + box1["width"], box2["x"] + box2["width"])
+        y2 = min(box1["y"] + box1["height"], box2["y"] + box2["height"])
 
-            x1, y1, x2, y2 = plate_xyxy
+        intersection = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = box1["width"] * box1["height"]
+        area2 = box2["width"] * box2["height"]
+        union = area1 + area2 - intersection
 
-            predictions_data.append(
-                {
-                    "x": (x1 / w) * 100.0,
-                    "y": (y1 / h) * 100.0,
-                    "width": ((x2 - x1) / w) * 100.0,
-                    "height": ((y2 - y1) / h) * 100.0,
-                    "rotation": 0.0,
-                    "score": plate_score,
-                    "label": "plate",
-                    "orig_w": w,
-                    "orig_h": h,
-                }
-            )
+        return intersection / union if union > 0 else 0
 
-        return {"items": predictions_data, "width": w, "height": h}
+    def _filter_plates(self, candidates, vehicle_boxes, w, h):
+        final_plates = []
+        conf_inside = float(os.getenv("YOLO_PLATE_CONF_IN_VEHICLE", 0.08))
+        conf_outside = float(os.getenv("YOLO_PLATE_CONF_OUTSIDE_VEHICLE", 0.10))
 
-    @staticmethod
-    def load_image_from_url(url):
-        # Download da imagem com autenticação opcional
-        token = os.getenv("LEGACY_TOKEN") or os.getenv("PERSONAL_TOKEN")
-        headers = {"Authorization": f"Token {token}"} if token else {}
+        for box, score in candidates:
+            is_inside = self._plate_center_inside_any_vehicle(box, vehicle_boxes)
+            threshold = conf_inside if is_inside else conf_outside
 
-        resp = requests.get(url, headers=headers, timeout=30)
-        resp.raise_for_status()
-
-        return Image.open(BytesIO(resp.content)).convert("RGB")
+            if score >= threshold:
+                x1, y1, x2, y2 = box
+                final_plates.append(
+                    self._format_item(x1, y1, x2, y2, w, h, "plate", score)
+                )
+        return final_plates
 
     def _generate_results(self, items):
-        # Converte predições para formato esperado pelo Label Studio
         results = []
         total_score = 0.0
-
         for it in items:
             try:
                 score = float(it.get("score", 0.0))
-                label = it.get("label", "")
-
                 res_item = {
                     "id": str(uuid4()),
                     "from_name": "label",
@@ -220,20 +229,15 @@ class ImageProcessor:
                         "width": it.get("width", 0),
                         "height": it.get("height", 0),
                         "rotation": it.get("rotation", 0),
-                        "rectanglelabels": [label],
+                        "rectanglelabels": [it.get("label", "")],
                     },
                     "score": score,
                     "type": "rectanglelabels",
                     "readonly": False,
                 }
-
                 results.append(res_item)
                 total_score += score
-
-            except Exception as e:
-                logger.error("Erro ao formatar item de predição: %s", e)
+            except Exception:
                 continue
-
         avg = total_score / len(results) if results else 0
-
         return [{"result": results, "model_version": "yolov11x", "score": avg}]

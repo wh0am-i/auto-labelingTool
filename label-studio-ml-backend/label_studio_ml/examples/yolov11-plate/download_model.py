@@ -23,9 +23,16 @@ def download(url=DEFAULT_URL, out=OUT_PATH):
                     dl += len(chunk)
                     if total:
                         done = int(50 * dl / total)
-                        sys.stdout.write('\r[{}{}] {:.1f}%'.format('=' * done, ' ' * (50 - done), dl / total * 100))
+                        bar = '[{}{}] {:.1f}%'.format(
+                            '=' * done,
+                            ' ' * (50 - done),
+                            dl / total * 100,
+                        )
+                        sys.stdout.write('\r' + bar + '   ')
                         sys.stdout.flush()
-        print('\nDownload concluído.')
+        if total:
+            sys.stdout.write('\n')
+        print('Download concluído.')
     except Exception as e:
         print(f'Erro ao baixar: {e}')
 

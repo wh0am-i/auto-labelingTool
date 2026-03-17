@@ -2,7 +2,6 @@ import os
 import tempfile
 import shutil
 import subprocess
-import requests
 import numpy as np
 from uuid import uuid4
 from PIL import Image

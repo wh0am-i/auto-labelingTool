@@ -54,7 +54,7 @@ class Loader:
             ):
                 raise ValueError(
                     f"Arquivo de modelo invalido (HTML): {self.model_path}. "
-                    "Baixe novamente com download_model.py (URL /resolve/, nao /blob/)."
+                    "Baixe novamente com utils.py download_model (URL /resolve/, nao /blob/)."
                 )
         except Exception:
             raise
@@ -126,7 +126,7 @@ class Loader:
                 self._plate_model_load_failed = True
                 raise RuntimeError(
                     f"Modelo de placas invalido/corrompido em {os.path.abspath(self.model_path)}. "
-                    "Baixe novamente com download_model.py."
+                    "Baixe novamente com utils.py download_model."
                 ) from e
             self._plate_model_load_failed = True
             logger.error("Erro ao carregar modelo YOLO: %s", e)

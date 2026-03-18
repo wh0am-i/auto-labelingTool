@@ -1,6 +1,9 @@
 import os
+import sys
 import logging
 from uuid import uuid4
+from io import BytesIO
+import requests
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -9,6 +12,27 @@ logger = logging.getLogger(__name__)
 class ImageProcessor:
     def __init__(self, model):
         self.model = model
+
+    def _render_progress(self, current, total, frame_idx, time_sec, src_fps):
+        if total <= 0:
+            return
+        width = 40
+        done = int(width * current / total)
+        percent = (current / total) * 100
+        bar = "[{}{}] {:5.1f}%".format("=" * done, " " * (width - done), percent)
+        msg = f"{bar} frame:{frame_idx} time:{time_sec:.2f}s fps:{src_fps:.2f}"
+        sys.stdout.write("\r" + msg + "   ")
+        sys.stdout.flush()
+
+    @staticmethod
+    def _get_headers():
+        token = os.getenv("LEGACY_TOKEN") or os.getenv("PERSONAL_TOKEN")
+        return {"Authorization": f"Token {token}"} if token else {}
+
+    def load_image_from_url(self, url):
+        resp = requests.get(url, headers=self._get_headers(), timeout=30)
+        resp.raise_for_status()
+        return Image.open(BytesIO(resp.content)).convert("RGB")
 
     @staticmethod
     def _plate_center_inside_any_vehicle(plate_xyxy, vehicle_boxes):
@@ -107,7 +131,9 @@ class ImageProcessor:
             ]
             tile_conf = float(os.getenv("YOLO_TILE_CONF", conf_v + 0.1))
 
-            for tx1, ty1, tx2, ty2 in tiles:
+            total_tiles = len(tiles)
+            for i, (tx1, ty1, tx2, ty2) in enumerate(tiles):
+                self._render_progress(i + 1, total_tiles, i + 1, 0.0, 0.0)
                 tile_img = img.crop((tx1, ty1, tx2, ty2))
                 tile_res = self.model._safe_model_predict(
                     v_yolo, tile_img, conf=tile_conf, verbose=False
@@ -139,6 +165,10 @@ class ImageProcessor:
                                         float(det.conf.item()),
                                     )
                                 )
+            if total_tiles > 0:
+                self._render_progress(total_tiles, total_tiles, total_tiles, 0.0, 0.0)
+                sys.stdout.write("\n")
+                sys.stdout.flush()
 
         return {"predictions": predictions_data, "boxes": vehicle_boxes}
 

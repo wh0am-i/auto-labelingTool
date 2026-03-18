@@ -41,8 +41,14 @@ echo "Iniciando setup do ambiente Label Studio"
 VENV_DIR="./labelStudioVenv"
 PYTHON_EXE="$VENV_DIR/bin/python"
 
+# Se existir mas nao for executavel, recria a venv (ex: criada em outro SO)
+if [ -e "$PYTHON_EXE" ] && [ ! -x "$PYTHON_EXE" ]; then
+    echo "Ambiente virtual encontrado, mas o python nao e executavel. Recriando..."
+    rm -rf "$VENV_DIR"
+fi
+
 # Criar venv se nao existir
-if [ ! -f "$PYTHON_EXE" ]; then
+if [ ! -x "$PYTHON_EXE" ]; then
     echo "Criando ambiente virtual..."
     "$PYTHON_BIN" -m venv "$VENV_DIR"
 
@@ -55,7 +61,7 @@ if [ ! -f "$PYTHON_EXE" ]; then
 fi
 
 # Garantir que estamos usando o Python da venv
-if [ ! -f "$PYTHON_EXE" ]; then
+if [ ! -x "$PYTHON_EXE" ]; then
     echo "ERRO: Python da venv nao encontrado."
     exit 1
 fi

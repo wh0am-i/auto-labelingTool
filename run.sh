@@ -143,7 +143,7 @@ verify_yolo_models() {
             [ -z "$DL_P" ] && DL_P="S"
             if [ "$DL_P" = "S" ] || [ "$DL_P" = "s" ]; then
                 pushd "$BASE_DIR/label-studio-ml-backend/label_studio_ml/examples/yolov11-plate" > /dev/null
-                "$PYTHON" download_model.py
+                "$PYTHON" utils.py download_model
                 popd > /dev/null
                 break
             fi
@@ -165,7 +165,7 @@ verify_yolo_models() {
             [ -z "$DL_V" ] && DL_V="S"
             if [ "$DL_V" = "S" ] || [ "$DL_V" = "s" ]; then
                 pushd "$BASE_DIR/label-studio-ml-backend/label_studio_ml/examples/yolov11" > /dev/null
-                "$PYTHON" download_model.py
+                "$PYTHON" utils.py download_model
                 popd > /dev/null
                 break
             fi

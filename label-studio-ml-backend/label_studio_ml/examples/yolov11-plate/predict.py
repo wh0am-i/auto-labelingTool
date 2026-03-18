@@ -61,10 +61,6 @@ class Predictor:
                 inference_path = normalized_path
                 converted_to_cfr = True
 
-            debug_path = self.video_processor._save_debug_video(
-                inference_path, converted_to_cfr
-            )
-
             # Aqui passamos o inference_path (que pode ser o original ou o convertido)
             video_pred = self.video_processor._process_video_frames(
                 inference_path, media_url
@@ -74,7 +70,6 @@ class Predictor:
                 {
                     "converted_to_cfr": converted_to_cfr,
                     "processed_video_path": normalized_path,
-                    "debug_video_path": debug_path,
                 }
             )
 

@@ -21,8 +21,7 @@ from label_studio_ml.model import LabelStudioMLBase
 from label_studio_sdk import Client
 from video import VideoProcessor
 from image import ImageProcessor
-from runtime import Runtime
-from utils import Utils
+from utils import Utils, Runtime
 from loader import Loader
 from predict import Predictor
 

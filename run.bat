@@ -165,7 +165,7 @@ if exist "!YOLO_PLATE_MODEL_PATH!" (
     if "!DL_P!"=="" set "DL_P=S"
     if /I "!DL_P!"=="S" (
         pushd ".\label-studio-ml-backend\label_studio_ml\examples\yolov11-plate"
-        %PYTHON% download_model.py
+        %PYTHON% utils.py download_model
         popd
     ) else if /I "!DL_P!"=="N" (
         echo [AVISO] Continuando sem baixar. Erros podem ocorrer na predicao.
@@ -183,7 +183,7 @@ if exist "!YOLO_VEHICLE_MODEL_PATH!" (
     if "!DL_V!"=="" set "DL_V=S"
     if /I "!DL_V!"=="S" (
         pushd ".\label-studio-ml-backend\label_studio_ml\examples\yolov11"
-        %PYTHON% download_model.py
+        %PYTHON% utils.py download_model
         popd
     ) else if /I "!DL_V!"=="N" (
         echo [AVISO] Continuando sem baixar.
